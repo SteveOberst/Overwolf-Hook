@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.2.0-beta.1...v0.3.0-beta.1) (2026-10-21)
+
+
+### Features
+
+* complete channel discovery and stoppable state and event recording ([changes](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.2.0-beta.1...v0.3.0-beta.1))
+
+
+### Bug Fixes
+
+* record explicit channel inventories including confirmed empty discovery ([changes](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.2.0-beta.1...v0.3.0-beta.1))
+
 ## [0.2.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.1.0-beta.1...v0.2.0-beta.1) (2026-10-21)
 
 
