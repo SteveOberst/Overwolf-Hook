@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace overwolf_event_hook::overwolf {
+namespace overwolf_hook::overwolf {
 // Only discrete-event services belong to this hook. InfoDB and unrelated
 // services must not be forwarded, even when every event channel is selected.
 inline uint32_t event_channel(std::string_view name) noexcept {

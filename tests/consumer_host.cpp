@@ -1,4 +1,4 @@
-#include <overwolf_event_hook/probe.h>
+#include <overwolf_hook/probe.h>
 #include "capture/overwolf/profile.hpp"
 #include <windows.h>
 #include <array>
@@ -11,7 +11,7 @@
 #define REQUIRE(test) do { if (!(test)) throw std::runtime_error(#test); } while (false)
 
 namespace {
-namespace profile = overwolf_event_hook::overwolf;
+namespace profile = overwolf_hook::overwolf;
 template<typename T> void put(void* base, size_t offset, T value) {
     std::memcpy(static_cast<char*>(base) + offset, &value, sizeof(value));
 }
@@ -31,10 +31,10 @@ struct Fixture {
     std::vector<unsigned char> output = std::vector<unsigned char>(30 * profile::raw_event_bytes);
     char name[32] = "ow_events_900001";
     profile::EventRange range{};
-    oeh_reader* received = nullptr;
+    owh_reader* received = nullptr;
     ~Fixture() {
-        oeh_probe_stop(nullptr);
-        oeh_reader_close(received);
+        owh_probe_stop(nullptr);
+        owh_reader_close(received);
         if (mutex) CloseHandle(mutex);
         if (retired) CloseHandle(retired);
         // Consumer/capture are deliberately pinned by explicit probe start.
@@ -83,17 +83,17 @@ int main(int argc, char** argv) {
         // A reviewed layout fixture around the actual consumer body, not a
         // reimplementation of that body's copying or timestamp selection.
         f.populate();
-        oeh_probe_options options{sizeof(options), OEH_ABI_VERSION, GetCurrentProcessId(), 900001, created(), {}};
+        owh_probe_options options{sizeof(options), OWH_ABI_VERSION, GetCurrentProcessId(), 900001, created(), {}};
         const auto channel = "consumer-host-" + std::to_string(GetCurrentProcessId());
         std::memcpy(options.channel, channel.c_str(), channel.size() + 1);
-        REQUIRE(oeh_probe_start(&options) == OEH_OK);
-        REQUIRE(oeh_probe_start(&options) == OEH_ALREADY_EXISTS);
-        REQUIRE(oeh_reader_open(1, options.channel, OEH_NEW_ONLY, &f.received).status == OEH_OK);
+        REQUIRE(owh_probe_start(&options) == OWH_OK);
+        REQUIRE(owh_probe_start(&options) == OWH_ALREADY_EXISTS);
+        REQUIRE(owh_reader_open(1, options.channel, OWH_NEW_ONLY, &f.received).status == OWH_OK);
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
         REQUIRE(f.range.end - f.range.begin == 2 * profile::raw_event_bytes);
         for (unsigned char i = 0; i < 2; ++i) {
-            oeh_probe_frame frame{}; oeh_record record{};
-            REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_OK);
+            owh_probe_frame frame{}; owh_record record{};
+            REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_OK);
             REQUIRE(record.sequence == i + 1u && record.size == sizeof(frame));
             REQUIRE(frame.source_channel == 900001 && frame.raw_size == profile::raw_event_bytes);
             REQUIRE(frame.raw[255] == 0xf0 + i && frame.raw[256] == 0 && frame.raw[257] == 255);
@@ -106,37 +106,37 @@ int main(int argc, char** argv) {
         put(f.reader.data(), 0x18, uint64_t{0});
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
         REQUIRE(f.range.end - f.range.begin == 2 * profile::raw_event_bytes);
-        oeh_probe_statistics stats{}; REQUIRE(oeh_probe_query(&stats) == OEH_OK);
+        owh_probe_statistics stats{}; REQUIRE(owh_probe_query(&stats) == OWH_OK);
         REQUIRE(stats.calls == 3 && stats.forwarded == 2 && stats.filtered == 1 && stats.invalid == 0 && stats.hook_enabled == 1);
-        REQUIRE(oeh_probe_stop(nullptr) == OEH_OK);
-        REQUIRE(oeh_probe_query(&stats) == OEH_OK && stats.hook_enabled == 0 && stats.active_calls == 0);
+        REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
+        REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.hook_enabled == 0 && stats.active_calls == 0);
         REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(f.consumer) + profile::reader_rva,
             profile::reader_entry.data(), profile::reader_entry.size()) == 0);
-        oeh_probe_frame frame{}; oeh_record record{};
-        REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_CLOSED);
+        owh_probe_frame frame{}; owh_record record{};
+        REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
         REQUIRE(f.range.end == f.range.begin);
-        oeh_reader_close(f.received); f.received = nullptr;
+        owh_reader_close(f.received); f.received = nullptr;
         // Re-enable the same retained trampoline without creating another hook
         // or accidentally sharing a previous recording channel.
         f.name[std::strlen(f.name) - 1] = '1';
         f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
-        REQUIRE(oeh_probe_start(&options) == OEH_OK);
+        REQUIRE(owh_probe_start(&options) == OWH_OK);
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
         // Exercise the recorder's start/stop boundaries: data produced before
         // reader open remains readable through that reader after hook shutdown.
-        REQUIRE(oeh_reader_open(1, options.channel, OEH_RETAINED, &f.received).status == OEH_OK);
-        REQUIRE(oeh_probe_stop(nullptr) == OEH_OK);
+        REQUIRE(owh_reader_open(1, options.channel, OWH_RETAINED, &f.received).status == OWH_OK);
+        REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
         for (int i = 0; i < 2; ++i)
-            REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_OK);
-        REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_CLOSED);
-        REQUIRE(oeh_probe_query(&stats) == OEH_OK && stats.forwarded == 2 && stats.active_calls == 0);
-        oeh_reader_close(f.received); f.received = nullptr;
+            REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_OK);
+        REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
+        REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.forwarded == 2 && stats.active_calls == 0);
+        owh_reader_close(f.received); f.received = nullptr;
         // A single wildcard session must preserve distinct source identities,
         // including newly encountered channels, and reject non-event services.
-        options.source_channel = OEH_ALL_CHANNELS;
-        REQUIRE(oeh_probe_start(&options) == OEH_OK);
-        REQUIRE(oeh_reader_open(1, options.channel, OEH_RETAINED, &f.received).status == OEH_OK);
+        options.source_channel = OWH_ALL_CHANNELS;
+        REQUIRE(owh_probe_start(&options) == OWH_OK);
+        REQUIRE(owh_reader_open(1, options.channel, OWH_RETAINED, &f.received).status == OWH_OK);
         const uint32_t channels[]{900001, 900002, UINT32_MAX};
         uint64_t sequence = 0;
         for (const auto channel_id : channels) {
@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
             f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
             REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
             for (int i = 0; i < 2; ++i) {
-                REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_OK);
+                REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_OK);
                 REQUIRE(frame.source_channel == channel_id && record.sequence == ++sequence);
                 REQUIRE(std::memcmp(frame.raw, f.output.data() + i * profile::raw_event_bytes,
                     profile::raw_event_bytes) == 0);
@@ -154,10 +154,10 @@ int main(int argc, char** argv) {
         std::memcpy(f.name, "ow_info_900001", sizeof("ow_info_900001"));
         f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
-        REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_NO_DATA);
-        REQUIRE(oeh_probe_query(&stats) == OEH_OK && stats.forwarded == 6 && stats.filtered == 1);
-        REQUIRE(oeh_probe_stop(nullptr) == OEH_OK);
-        REQUIRE(oeh_reader_next(f.received, &frame, sizeof(frame), &record).status == OEH_CLOSED);
+        REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_NO_DATA);
+        REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.forwarded == 6 && stats.filtered == 1);
+        REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
+        REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
         std::cout << "PASS actual consumer trampoline, channel selection, multiplexing, exact raw bytes, watermark, stop, restart, drain\n";
         return 0;
     } catch (const std::exception& error) {

@@ -1,4 +1,4 @@
-#include <overwolf_event_hook/bridge.h>
+#include <overwolf_hook/bridge.h>
 #include <windows.h>
 #include <array>
 #include <cstring>
@@ -15,51 +15,51 @@ struct Handle {
     ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
 };
 struct Writer {
-    oeh_writer* value = nullptr;
-    ~Writer() { if (value) oeh_writer_close(value); }
+    owh_writer* value = nullptr;
+    ~Writer() { if (value) owh_writer_close(value); }
 };
 struct Reader {
-    oeh_reader* value = nullptr;
-    ~Reader() { oeh_reader_close(value); }
+    owh_reader* value = nullptr;
+    ~Reader() { owh_reader_close(value); }
 };
 std::string channel_name() {
     return "test-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64());
 }
 void create(Writer& writer, const std::string& name, uint32_t slots = 4, uint32_t bytes = 64) {
-    REQUIRE(oeh_writer_create(OEH_ABI_VERSION, name.c_str(), slots, bytes, &writer.value).status == OEH_OK);
+    REQUIRE(owh_writer_create(OWH_ABI_VERSION, name.c_str(), slots, bytes, &writer.value).status == OWH_OK);
 }
-void open(Reader& reader, const std::string& name, oeh_start start = OEH_RETAINED) {
-    REQUIRE(oeh_reader_open(OEH_ABI_VERSION, name.c_str(), start, &reader.value).status == OEH_OK);
+void open(Reader& reader, const std::string& name, owh_start start = OWH_RETAINED) {
+    REQUIRE(owh_reader_open(OWH_ABI_VERSION, name.c_str(), start, &reader.value).status == OWH_OK);
 }
 void publish(Writer& writer, uint32_t number) {
-    REQUIRE(oeh_writer_publish(writer.value, &number, sizeof(number)).status == OEH_OK);
+    REQUIRE(owh_writer_publish(writer.value, &number, sizeof(number)).status == OWH_OK);
 }
-oeh_record read(Reader& reader, uint32_t expected) {
-    oeh_record record{};
+owh_record read(Reader& reader, uint32_t expected) {
+    owh_record record{};
     uint32_t value = 0;
-    REQUIRE(oeh_reader_next(reader.value, &value, sizeof(value), &record).status == OEH_OK);
+    REQUIRE(owh_reader_next(reader.value, &value, sizeof(value), &record).status == OWH_OK);
     REQUIRE(record.size == sizeof(value));
     REQUIRE(value == expected);
     return record;
 }
-oeh_status next_status(Reader& reader) {
-    oeh_record record{};
+owh_status next_status(Reader& reader) {
+    owh_record record{};
     uint32_t value;
-    return oeh_reader_next(reader.value, &value, sizeof(value), &record).status;
+    return owh_reader_next(reader.value, &value, sizeof(value), &record).status;
 }
 
 void roundtrip() {
     const auto name = channel_name(); Writer writer; Reader reader;
     create(writer, name); open(reader, name);
-    REQUIRE(next_status(reader) == OEH_NO_DATA);
+    REQUIRE(next_status(reader) == OWH_NO_DATA);
     const std::array<unsigned char, 7> source{0, 255, 1, 0, 128, 2, 3};
-    REQUIRE(oeh_writer_publish(writer.value, source.data(), 7).status == OEH_OK);
-    std::array<unsigned char, 7> target{}; oeh_record record{};
-    REQUIRE(oeh_reader_next(reader.value, target.data(), 7, &record).status == OEH_OK);
+    REQUIRE(owh_writer_publish(writer.value, source.data(), 7).status == OWH_OK);
+    std::array<unsigned char, 7> target{}; owh_record record{};
+    REQUIRE(owh_reader_next(reader.value, target.data(), 7, &record).status == OWH_OK);
     REQUIRE(source == target && record.sequence == 1 && !record.lost_before);
-    REQUIRE(next_status(reader) == OEH_NO_DATA);
-    REQUIRE(oeh_writer_publish(writer.value, nullptr, 0).status == OEH_OK);
-    REQUIRE(oeh_reader_next(reader.value, nullptr, 0, &record).status == OEH_OK);
+    REQUIRE(next_status(reader) == OWH_NO_DATA);
+    REQUIRE(owh_writer_publish(writer.value, nullptr, 0).status == OWH_OK);
+    REQUIRE(owh_reader_next(reader.value, nullptr, 0, &record).status == OWH_OK);
     REQUIRE(record.sequence == 2 && record.size == 0);
 }
 void readers() {
@@ -72,8 +72,8 @@ void readers() {
 void boundary() {
     const auto name = channel_name(); Writer writer; Reader retained, fresh;
     create(writer, name); publish(writer, 1);
-    open(retained, name); open(fresh, name, OEH_NEW_ONLY);
-    read(retained, 1); REQUIRE(next_status(fresh) == OEH_NO_DATA);
+    open(retained, name); open(fresh, name, OWH_NEW_ONLY);
+    read(retained, 1); REQUIRE(next_status(fresh) == OWH_NO_DATA);
     publish(writer, 2); REQUIRE(read(fresh, 2).sequence == 2);
 }
 void overflow() {
@@ -88,44 +88,44 @@ void overflow() {
 void buffer() {
     const auto name = channel_name(); Writer writer; Reader reader;
     create(writer, name); open(reader, name); publish(writer, 0x12345678);
-    char byte; oeh_record record{};
-    REQUIRE(oeh_reader_next(reader.value, &byte, 1, &record).status == OEH_BUFFER_TOO_SMALL);
+    char byte; owh_record record{};
+    REQUIRE(owh_reader_next(reader.value, &byte, 1, &record).status == OWH_BUFFER_TOO_SMALL);
     REQUIRE(record.size == 4 && record.sequence == 1);
     REQUIRE(read(reader, 0x12345678).sequence == 1);
-    REQUIRE(oeh_writer_publish(writer.value, &byte, 65).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(next_status(reader) == OEH_NO_DATA);
+    REQUIRE(owh_writer_publish(writer.value, &byte, 65).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(next_status(reader) == OWH_NO_DATA);
 }
 void invalid() {
     Writer writer; Reader reader; const auto name = channel_name();
-    REQUIRE(oeh_reader_open(OEH_ABI_VERSION, name.c_str(), OEH_RETAINED, &reader.value).status == OEH_NOT_FOUND);
+    REQUIRE(owh_reader_open(OWH_ABI_VERSION, name.c_str(), OWH_RETAINED, &reader.value).status == OWH_NOT_FOUND);
     REQUIRE(!reader.value);
-    REQUIRE(oeh_writer_create(999, name.c_str(), 1, 8, &writer.value).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_create(1, "bad\\name", 1, 8, &writer.value).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_create(1, "", 1, 8, &writer.value).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_create(1, name.c_str(), 0, 8, &writer.value).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_create(1, name.c_str(), 4096, 65536, &writer.value).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_publish(nullptr, nullptr, 0).status == OEH_INVALID_ARGUMENT);
-    REQUIRE(oeh_writer_close(nullptr).status == OEH_OK);
-    oeh_record record{};
-    REQUIRE(oeh_reader_next(nullptr, nullptr, 0, &record).status == OEH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_create(999, name.c_str(), 1, 8, &writer.value).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_create(1, "bad\\name", 1, 8, &writer.value).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_create(1, "", 1, 8, &writer.value).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_create(1, name.c_str(), 0, 8, &writer.value).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_create(1, name.c_str(), 4096, 65536, &writer.value).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_publish(nullptr, nullptr, 0).status == OWH_INVALID_ARGUMENT);
+    REQUIRE(owh_writer_close(nullptr).status == OWH_OK);
+    owh_record record{};
+    REQUIRE(owh_reader_next(nullptr, nullptr, 0, &record).status == OWH_INVALID_ARGUMENT);
 }
 void lifecycle() {
     const auto name = channel_name(); Writer writer, duplicate; Reader reader;
     create(writer, name); open(reader, name); publish(writer, 7);
-    REQUIRE(oeh_writer_create(1, name.c_str(), 4, 64, &duplicate.value).status == OEH_ALREADY_EXISTS);
+    REQUIRE(owh_writer_create(1, name.c_str(), 4, 64, &duplicate.value).status == OWH_ALREADY_EXISTS);
     REQUIRE(!duplicate.value);
-    REQUIRE(oeh_writer_close(writer.value).status == OEH_OK); writer.value = nullptr;
-    read(reader, 7); REQUIRE(next_status(reader) == OEH_CLOSED);
+    REQUIRE(owh_writer_close(writer.value).status == OWH_OK); writer.value = nullptr;
+    read(reader, 7); REQUIRE(next_status(reader) == OWH_CLOSED);
     // Old readers deliberately keep the old mapping alive. Never reinitialize it.
-    REQUIRE(oeh_writer_create(1, name.c_str(), 4, 64, &duplicate.value).status == OEH_ALREADY_EXISTS);
-    oeh_reader_close(reader.value); reader.value = nullptr;
+    REQUIRE(owh_writer_create(1, name.c_str(), 4, 64, &duplicate.value).status == OWH_ALREADY_EXISTS);
+    owh_reader_close(reader.value); reader.value = nullptr;
     create(writer, name); open(reader, name); publish(writer, 8);
     REQUIRE(read(reader, 8).sequence == 1);
 }
 void corrupt() {
     const auto name = channel_name(); Writer writer; Reader reader;
     create(writer, name); open(reader, name);
-    const std::string mapping_name = "Local\\overwolf-event-hook." + name + ".data";
+    const std::string mapping_name = "Local\\overwolf-hook." + name + ".data";
     Handle mapping{OpenFileMappingA(FILE_MAP_WRITE, FALSE, mapping_name.c_str())};
     REQUIRE(mapping.value);
     void* view = MapViewOfFile(mapping.value, FILE_MAP_WRITE, 0, 0, 0); REQUIRE(view);
@@ -133,11 +133,11 @@ void corrupt() {
     const uint32_t bad_version = 900;
     std::memcpy(static_cast<char*>(view) + 4, &bad_version, sizeof(bad_version));
     UnmapViewOfFile(view);
-    REQUIRE(next_status(reader) == OEH_INCOMPATIBLE);
+    REQUIRE(next_status(reader) == OWH_INCOMPATIBLE);
 }
 
 std::wstring event_name(const std::string& name, const wchar_t* suffix) {
-    return L"Local\\oeh-test." + std::wstring(name.begin(), name.end()) + suffix;
+    return L"Local\\owh-test." + std::wstring(name.begin(), name.end()) + suffix;
 }
 int producer(const std::string& name) {
     Writer writer; create(writer, name);
@@ -146,7 +146,7 @@ int producer(const std::string& name) {
     REQUIRE(ready.value && stop.value);
     publish(writer, 101); publish(writer, 202); REQUIRE(SetEvent(ready.value));
     REQUIRE(WaitForSingleObject(stop.value, 10000) == WAIT_OBJECT_0);
-    REQUIRE(oeh_writer_close(writer.value).status == OEH_OK); writer.value = nullptr;
+    REQUIRE(owh_writer_close(writer.value).status == OWH_OK); writer.value = nullptr;
     return 0;
 }
 
@@ -180,7 +180,7 @@ void process_test(bool crash) {
     DWORD code = 0; REQUIRE(GetExitCodeProcess(child.value, &code));
     REQUIRE(code == (crash ? 23u : 0u));
     read(first, 202); read(second, 202);
-    REQUIRE(next_status(first) == OEH_CLOSED && next_status(second) == OEH_CLOSED);
+    REQUIRE(next_status(first) == OWH_CLOSED && next_status(second) == OWH_CLOSED);
 }
 }
 

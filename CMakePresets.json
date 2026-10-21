@@ -7,7 +7,7 @@
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-x64",
-      "cacheVariables": { "BUILD_TESTING": "ON", "OEH_HOOK_TESTS": "ON" }
+      "cacheVariables": { "BUILD_TESTING": "ON", "OWH_HOOK_TESTS": "ON" }
     }
   ],
   "buildPresets": [

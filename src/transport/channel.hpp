@@ -1,14 +1,14 @@
 #pragma once
 
-#include <overwolf_event_hook/bridge.h>
+#include <overwolf_hook/bridge.h>
 #include <windows.h>
 #include <cstddef>
 #include <memory>
 #include <utility>
 
-namespace overwolf_event_hook {
-struct Failure { oeh_result result; };
-[[noreturn]] inline void fail(oeh_status status, DWORD native = 0) {
+namespace overwolf_hook {
+struct Failure { owh_result result; };
+[[noreturn]] inline void fail(owh_status status, DWORD native = 0) {
     throw Failure{{status, native}};
 }
 
@@ -78,11 +78,11 @@ private:
     bool abandoned_ = false;
 };
 
-template<typename F> oeh_result boundary(F&& action) noexcept {
+template<typename F> owh_result boundary(F&& action) noexcept {
     try { return action(); }
     catch (const Failure& error) { return error.result; }
-    catch (const std::bad_alloc&) { return {OEH_RESOURCE_EXHAUSTED, 0}; }
-    catch (...) { return {OEH_SYSTEM_ERROR, ERROR_UNHANDLED_EXCEPTION}; }
+    catch (const std::bad_alloc&) { return {OWH_RESOURCE_EXHAUSTED, 0}; }
+    catch (...) { return {OWH_SYSTEM_ERROR, ERROR_UNHANDLED_EXCEPTION}; }
 }
-inline constexpr oeh_result ok{OEH_OK, 0};
+inline constexpr owh_result ok{OWH_OK, 0};
 }

@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: >-
           cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64
-          -DBUILD_TESTING=ON -DOEH_HOOK_TESTS=ON -DOEH_FFM_TESTS=ON
+          -DBUILD_TESTING=ON -DOWH_HOOK_TESTS=ON -DOWH_FFM_TESTS=ON
           "-DJava_JAVA_EXECUTABLE=$env:JAVA_HOME/bin/java.exe"
       - name: Build
         run: cmake --build build/ci --config ${{ matrix.configuration }}
