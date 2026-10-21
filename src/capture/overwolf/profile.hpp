@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace event_tap::overwolf {
+namespace overwolf_event_hook::overwolf {
 // Reviewed artifact only: OWGameEventsConsumer.dll 2.0.0.5 from Overwolf 0.311.1.1.
 // Reviewed through static caller/reader analysis and an owned-host fixture;
 // subsequently exercised in the real host on 2026-10-21. See README compatibility.

@@ -30,16 +30,16 @@ class FfmRoundtrip {
         try (Arena arena = Arena.ofConfined()) {
             SymbolLookup capture = SymbolLookup.libraryLookup(Path.of(args[0]), arena);
             SymbolLookup client = SymbolLookup.libraryLookup(Path.of(args[1]), arena);
-            MethodHandle create = function(capture, "oet_writer_create",
+            MethodHandle create = function(capture, "oeh_writer_create",
                 FunctionDescriptor.of(RESULT, JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, ADDRESS));
-            MethodHandle publish = function(capture, "oet_writer_publish",
+            MethodHandle publish = function(capture, "oeh_writer_publish",
                 FunctionDescriptor.of(RESULT, ADDRESS, ADDRESS, JAVA_INT));
-            MethodHandle closeWriter = function(capture, "oet_writer_close", FunctionDescriptor.of(RESULT, ADDRESS));
-            MethodHandle open = function(client, "oet_reader_open",
+            MethodHandle closeWriter = function(capture, "oeh_writer_close", FunctionDescriptor.of(RESULT, ADDRESS));
+            MethodHandle open = function(client, "oeh_reader_open",
                 FunctionDescriptor.of(RESULT, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
-            MethodHandle next = function(client, "oet_reader_next",
+            MethodHandle next = function(client, "oeh_reader_next",
                 FunctionDescriptor.of(RESULT, ADDRESS, ADDRESS, JAVA_INT, ADDRESS));
-            MethodHandle closeReader = function(client, "oet_reader_close", FunctionDescriptor.ofVoid(ADDRESS));
+            MethodHandle closeReader = function(client, "oeh_reader_close", FunctionDescriptor.ofVoid(ADDRESS));
             MemorySegment name = arena.allocateFrom("ffm-" + ProcessHandle.current().pid());
             MemorySegment writerOut = arena.allocate(ADDRESS);
             MemorySegment readerOut = arena.allocate(ADDRESS);

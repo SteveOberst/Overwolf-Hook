@@ -1,14 +1,14 @@
 #pragma once
 
-#include <event_tap/bridge.h>
+#include <overwolf_event_hook/bridge.h>
 #include <windows.h>
 #include <cstddef>
 #include <memory>
 #include <utility>
 
-namespace event_tap {
-struct Failure { oet_result result; };
-[[noreturn]] inline void fail(oet_status status, DWORD native = 0) {
+namespace overwolf_event_hook {
+struct Failure { oeh_result result; };
+[[noreturn]] inline void fail(oeh_status status, DWORD native = 0) {
     throw Failure{{status, native}};
 }
 
@@ -78,11 +78,11 @@ private:
     bool abandoned_ = false;
 };
 
-template<typename F> oet_result boundary(F&& action) noexcept {
+template<typename F> oeh_result boundary(F&& action) noexcept {
     try { return action(); }
     catch (const Failure& error) { return error.result; }
-    catch (const std::bad_alloc&) { return {OET_RESOURCE_EXHAUSTED, 0}; }
-    catch (...) { return {OET_SYSTEM_ERROR, ERROR_UNHANDLED_EXCEPTION}; }
+    catch (const std::bad_alloc&) { return {OEH_RESOURCE_EXHAUSTED, 0}; }
+    catch (...) { return {OEH_SYSTEM_ERROR, ERROR_UNHANDLED_EXCEPTION}; }
 }
-inline constexpr oet_result ok{OET_OK, 0};
+inline constexpr oeh_result ok{OEH_OK, 0};
 }

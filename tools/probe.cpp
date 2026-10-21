@@ -1,4 +1,4 @@
-#include <event_tap/probe.h>
+#include <overwolf_event_hook/probe.h>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -95,10 +95,10 @@ int wmain(int argc, wchar_t** argv) {
     try {
         // No generic injection interface: explicitly selected Overwolf host only.
         if (argc != 5 && argc != 6) {
-            std::cerr << "Usage: oet_probe <Overwolf PID> <capture DLL absolute path> <seconds:1..120> <new capture file> [all|source-channel]\n";
+            std::cerr << "Usage: oeh_probe <Overwolf PID> <capture DLL absolute path> <seconds:1..120> <new capture file> [all|source-channel]\n";
             return 2;
         }
-        uint32_t source_channel = OET_ALL_CHANNELS;
+        uint32_t source_channel = OEH_ALL_CHANNELS;
         if (argc == 6 && std::wstring_view(argv[5]) != L"all") {
             const std::wstring value(argv[5]);
             if (value.empty() || value.find_first_not_of(L"0123456789") != std::wstring::npos)
@@ -142,20 +142,20 @@ int wmain(int argc, wchar_t** argv) {
             if (!symbol) error("Capture export unavailable");
             return remote.base + reinterpret_cast<uintptr_t>(symbol) - reinterpret_cast<uintptr_t>(local);
         };
-        Session session{process.value, entry("oet_probe_stop")};
-        oet_probe_options options{sizeof(options), OET_ABI_VERSION, GetCurrentProcessId(), source_channel,
+        Session session{process.value, entry("oeh_probe_stop")};
+        oeh_probe_options options{sizeof(options), OEH_ABI_VERSION, GetCurrentProcessId(), source_channel,
             created(GetCurrentProcess()), {}};
         const auto name = "overwolf-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64());
         std::memcpy(options.channel, name.c_str(), name.size() + 1);
         RemoteBuffer configuration(process.value, &options, sizeof(options));
         session.started = true;
-        const DWORD started = call(process.value, entry("oet_probe_start"), &configuration);
-        if (started == OET_ALREADY_EXISTS) session.started = false;
-        if (started != OET_OK) throw std::runtime_error("Probe start failed: status " + std::to_string(started));
-        struct Reader { oet_reader* value = nullptr; ~Reader() { oet_reader_close(value); } } reader;
+        const DWORD started = call(process.value, entry("oeh_probe_start"), &configuration);
+        if (started == OEH_ALREADY_EXISTS) session.started = false;
+        if (started != OEH_OK) throw std::runtime_error("Probe start failed: status " + std::to_string(started));
+        struct Reader { oeh_reader* value = nullptr; ~Reader() { oeh_reader_close(value); } } reader;
         // The newly created channel contains this capture session only. Include
         // records published between hook enable and this reader opening.
-        if (oet_reader_open(1, options.channel, OET_RETAINED, &reader.value).status != OET_OK)
+        if (oeh_reader_open(1, options.channel, OEH_RETAINED, &reader.value).status != OEH_OK)
             throw std::runtime_error("Capture channel unavailable after start");
         std::cout << "hook enabled; channel=" << options.channel
             << "; source=" << (source_channel ? std::to_string(source_channel) : "all")
@@ -163,20 +163,20 @@ int wmain(int argc, wchar_t** argv) {
         const ULONGLONG deadline = GetTickCount64() + seconds * 1000ull;
         uint64_t received = 0, lost = 0;
         bool stopped = false;
-        DWORD stop_result = OET_OK;
+        DWORD stop_result = OEH_OK;
         for (;;) {
             if (!stopped && GetTickCount64() >= deadline) {
                 stop_result = call(process.value, session.stop);
-                session.started = stop_result != OET_OK;
-                if (stop_result != OET_OK)
+                session.started = stop_result != OEH_OK;
+                if (stop_result != OEH_OK)
                     throw std::runtime_error("Capture did not stop: " + std::to_string(stop_result));
                 stopped = true;
             }
-            oet_probe_frame frame{}; oet_record record{};
-            const auto result = oet_reader_next(reader.value, &frame, sizeof(frame), &record);
-            if (result.status == OET_NO_DATA || result.status == OET_BUSY) { Sleep(1); continue; }
-            if (result.status == OET_CLOSED) break;
-            if (result.status != OET_OK || record.size != sizeof(frame))
+            oeh_probe_frame frame{}; oeh_record record{};
+            const auto result = oeh_reader_next(reader.value, &frame, sizeof(frame), &record);
+            if (result.status == OEH_NO_DATA || result.status == OEH_BUSY) { Sleep(1); continue; }
+            if (result.status == OEH_CLOSED) break;
+            if (result.status != OEH_OK || record.size != sizeof(frame))
                 throw std::runtime_error("Invalid capture read: " + std::to_string(result.status));
             write(output.value, &record, sizeof(record)); write(output.value, &frame, sizeof(frame));
             ++received; lost += record.lost_before;
@@ -190,11 +190,11 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (!stopped) {
             stop_result = call(process.value, session.stop);
-            session.started = stop_result != OET_OK;
+            session.started = stop_result != OEH_OK;
         }
-        oet_probe_statistics statistics{};
+        oeh_probe_statistics statistics{};
         RemoteBuffer stats(process.value, nullptr, sizeof(statistics));
-        if (call(process.value, entry("oet_probe_query"), &stats) != OET_OK)
+        if (call(process.value, entry("oeh_probe_query"), &stats) != OEH_OK)
             throw std::runtime_error("Capture diagnostics unavailable");
         SIZE_T read = 0;
         if (!ReadProcessMemory(process.value, stats.address, &statistics, sizeof(statistics), &read) || read != sizeof(statistics))
@@ -204,6 +204,6 @@ int wmain(int argc, wchar_t** argv) {
             << " filtered=" << statistics.filtered << " invalid=" << statistics.invalid << " active=" << statistics.active_calls
             << " enabled=" << statistics.hook_enabled << " stop=" << stop_result << '\n';
         FreeLibrary(local);
-        return stop_result == OET_OK && !statistics.hook_enabled && !statistics.active_calls ? 0 : 1;
+        return stop_result == OEH_OK && !statistics.hook_enabled && !statistics.active_calls ? 0 : 1;
     } catch (const std::exception& problem) { std::cerr << problem.what() << '\n'; return 1; }
 }

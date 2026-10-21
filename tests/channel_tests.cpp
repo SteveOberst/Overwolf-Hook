@@ -7,7 +7,7 @@
 
 int main() {
     try {
-        using event_tap::overwolf::event_channel;
+        using overwolf_event_hook::overwolf::event_channel;
         REQUIRE(event_channel("ow_events_10054261") == 10054261);
         REQUIRE(event_channel("ow_events_900001") == 900001);
         REQUIRE(event_channel("ow_events_4294967295") == UINT32_MAX);

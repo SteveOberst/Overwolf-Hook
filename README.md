@@ -1,4 +1,4 @@
-# Overwolf-Hook
+# Overwolf Event Hook
 
 Capture Overwolf game events without building or running an Overwolf app. Feed
 the events into your own tools, or record them for later inspection. Overwolf
@@ -18,8 +18,8 @@ Requires Windows x64, Visual Studio 2022 or newer with C++ tools/Windows SDK,
 and CMake 3.25+. Java 25 is needed only for the optional FFM example/test.
 
 ```powershell
-git clone https://github.com/SteveOberst/Overwolf-Hook.git
-cd Overwolf-Hook
+git clone https://github.com/SteveOberst/Overwolf-Event-Hook.git
+cd Overwolf-Event-Hook
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
@@ -31,7 +31,7 @@ For Visual Studio 2026 use `-G "Visual Studio 18 2026"`, or the included
 MinHook is fetched automatically through CMake FetchContent with a pinned hash.
 No manual ZIP, checkout, Overwolf SDK or running game is needed to build.
 
-The installed package contains `oet_capture.dll`, `oet_client.dll`, `oet_probe.exe`,
+The installed package contains `oeh_capture.dll`, `oeh_client.dll`, `oeh_probe.exe`,
 C headers, CMake targets and license notices. The DLLs use the Microsoft C++
 runtime; install the x64 Visual C++ Redistributable if it is missing.
 
@@ -42,7 +42,7 @@ Use the PID of `Overwolf.exe`, not a browser/helper or a game process.
 
 ```powershell
 Get-Process Overwolf | Select-Object Id
-./out/install/bin/oet_probe.exe <PID> "$PWD/out/install/bin/oet_capture.dll" 20 "$PWD/events.bin"
+./out/install/bin/oeh_probe.exe <PID> "$PWD/out/install/bin/oeh_capture.dll" 20 "$PWD/events.bin"
 python tools/inspect_capture.py events.bin
 ```
 
@@ -57,14 +57,14 @@ frame retains its actual `source_channel`, so consumers can separate sources.
 An optional last argument restricts capture to one channel:
 
 ```powershell
-./out/install/bin/oet_probe.exe <PID> "$PWD/out/install/bin/oet_capture.dll" 20 "$PWD/events.bin" 10054261
+./out/install/bin/oeh_probe.exe <PID> "$PWD/out/install/bin/oeh_capture.dll" 20 "$PWD/events.bin" 10054261
 ```
 
 `10054261` is the channel observed in the League test, not its public Overwolf
 game ID (`5426`). Channel IDs are internal transport identities; this library
 does not assume a universal game-ID-to-channel formula. Omit the argument or
 pass `all` to avoid needing one. For in-host C ABI control, set
-`oet_probe_options.source_channel` to `OET_ALL_CHANNELS` or a specific channel.
+`oeh_probe_options.source_channel` to `OEH_ALL_CHANNELS` or a specific channel.
 
 The controller loads the capture DLL into the selected Overwolf host and invokes
 explicit start/stop exports. The hook copies raw records after the original
@@ -79,15 +79,15 @@ failure handling still needs dedicated live testing.
 
 ## Use from C/C++
 
-The installed CMake package is named `EventTap`:
+The installed CMake package is named `OverwolfEventHook`:
 
 ```cmake
-find_package(EventTap CONFIG REQUIRED)
-target_link_libraries(your_app PRIVATE EventTap::Client)
+find_package(OverwolfEventHook CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE OverwolfEventHook::Client)
 ```
 
-Use [bridge.h](include/event_tap/bridge.h) for the client/transport API and
-[probe.h](include/event_tap/probe.h) for capture frames and in-host control exports.
+Use [bridge.h](include/overwolf_event_hook/bridge.h) for the client/transport API and
+[probe.h](include/overwolf_event_hook/probe.h) for capture frames and in-host control exports.
 The control exports operate inside the capture host; calling them in your own
 process does not install a remote hook. Use the CLI to start a capture.
 
@@ -100,10 +100,10 @@ cmake --build build/example --config Release
 ./build/example/Release/read_events.exe <channel>
 ```
 
-Readers choose `OET_RETAINED` (oldest available record) or `OET_NEW_ONLY` (a
-boundary at reader open). `oet_reader_next` copies one record into caller-owned
-memory. `OET_BUFFER_TOO_SMALL` reports the required size without consuming it;
-`OET_NO_DATA`, `OET_NOT_FOUND` and `OET_CLOSED` are distinct. Close every reader.
+Readers choose `OEH_RETAINED` (oldest available record) or `OEH_NEW_ONLY` (a
+boundary at reader open). `oeh_reader_next` copies one record into caller-owned
+memory. `OEH_BUFFER_TOO_SMALL` reports the required size without consuming it;
+`OEH_NO_DATA`, `OEH_NOT_FOUND` and `OEH_CLOSED` are distinct. Close every reader.
 Serialize calls on each handle and do not race them with close.
 
 ## Use from the JVM
@@ -113,7 +113,7 @@ of native symbol lookup, C struct layouts, calls and cleanup. It uses a private
 test channel and does not touch Overwolf:
 
 ```powershell
-java --enable-native-access=ALL-UNNAMED examples/java/FfmRoundtrip.java "$PWD/out/install/bin/oet_capture.dll" "$PWD/out/install/bin/oet_client.dll"
+java --enable-native-access=ALL-UNNAMED examples/java/FfmRoundtrip.java "$PWD/out/install/bin/oeh_capture.dll" "$PWD/out/install/bin/oeh_client.dll"
 ```
 
 Kotlin can use the same `java.lang.foreign` API. No JVM or JNI code runs in
@@ -161,13 +161,13 @@ additional games' producer behavior.
 - Our ring has sequence numbers and per-reader overwrite counts. Producer loss,
   Overwolf's original ring overwrites and its consumer age filter are upstream
   and cannot be recovered here. No lossless-delivery guarantee is made.
-- Capture publishes without waiting for readers. Contention returns `OET_BUSY`;
+- Capture publishes without waiting for readers. Contention returns `OEH_BUSY`;
   rejected captures and malformed ranges have separate counters.
 - Shared objects use the current Windows session and default process ACLs. They
   are not a hostile-peer security boundary. Raw records can contain identifiers;
   review captures before sharing them.
-- The experimental recording is a sequence of native x64 `oet_record` plus
-  `oet_probe_frame` structs (ABI 1), not a stable archival format.
+- The experimental recording is a sequence of native x64 `oeh_record` plus
+  `oeh_probe_frame` structs (ABI 1), not a stable archival format.
 
 A 20-second live run on 2026-10-21 forwarded 15 observed damage events with zero
 reported bridge overwrites/rejections. The original entry bytes were verified
@@ -182,12 +182,12 @@ No test injects into a running third-party process. An optional owned-host test
 executes the real consumer reader against synthetic layout storage:
 
 ```powershell
-cmake -S . -B build "-DOET_REVIEWED_CONSUMER=C:/path/to/OWGameEventsConsumer.dll"
+cmake -S . -B build "-DOEH_REVIEWED_CONSUMER=C:/path/to/OWGameEventsConsumer.dll"
 ```
 
-Enable the JVM test with `-DOET_FFM_TESTS=ON` and, if necessary,
-`-DJava_JAVA_EXECUTABLE=C:/path/to/java.exe`. Set `OET_OVERWOLF_PROBE=OFF` to
-build only the bridge; also disable `OET_HOOK_TESTS` to avoid MinHook completely.
+Enable the JVM test with `-DOEH_FFM_TESTS=ON` and, if necessary,
+`-DJava_JAVA_EXECUTABLE=C:/path/to/java.exe`. Set `OEH_OVERWOLF_PROBE=OFF` to
+build only the bridge; also disable `OEH_HOOK_TESTS` to avoid MinHook completely.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
 `fix:` for fixes, `feat:` for features, and `!` / `BREAKING CHANGE:` for breaking

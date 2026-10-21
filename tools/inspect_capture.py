@@ -51,7 +51,7 @@ def inspect(path: Path):
             digest.update(header)
             digest.update(frame)
     return {
-        "format": "oet experimental x64 record + frame, ABI 1",
+        "format": "oeh experimental x64 record + frame, ABI 1",
         "records": len(sequences),
         "first_sequence": sequences[0] if sequences else None,
         "last_sequence": sequences[-1] if sequences else None,
