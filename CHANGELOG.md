@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.3.0-beta.1...v0.4.0-beta.1) (2026-10-21)
+
+
+### Features
+
+* add bundled JVM SDK and signature-based consumer discovery ([changes](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.3.0-beta.1...v0.4.0-beta.1))
+
 ## [0.3.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.2.0-beta.1...v0.3.0-beta.1) (2026-10-21)
 
 
