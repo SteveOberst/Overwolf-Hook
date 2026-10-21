@@ -1,4 +1,5 @@
 #include <overwolf_hook/probe.h>
+#include "capture_control.hpp"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -12,6 +13,17 @@
 #include <vector>
 
 namespace {
+HANDLE console_stop = nullptr;
+HANDLE console_done = nullptr;
+BOOL WINAPI console_handler(DWORD signal) {
+    if (signal != CTRL_C_EVENT && signal != CTRL_BREAK_EVENT && signal != CTRL_CLOSE_EVENT &&
+        signal != CTRL_LOGOFF_EVENT && signal != CTRL_SHUTDOWN_EVENT) return FALSE;
+    SetEvent(console_stop);
+    // Console-close otherwise terminates us as soon as this handler returns.
+    // The owner-process watcher remains the fallback if Windows' deadline wins.
+    if (signal != CTRL_C_EVENT && signal != CTRL_BREAK_EVENT) WaitForSingleObject(console_done, 4000);
+    return TRUE;
+}
 [[noreturn]] void error(const char* what) {
     throw std::runtime_error(std::string(what) + " (Win32 " + std::to_string(GetLastError()) + ")");
 }
@@ -79,10 +91,23 @@ struct Session {
     uintptr_t stop = 0;
     bool started = false;
     ~Session() {
-        if (started && stop) {
+        if (started && stop && WaitForSingleObject(process, 0) == WAIT_TIMEOUT) {
             try { call(process, stop); }
             catch (const std::exception& problem) { std::cerr << "Stop: " << problem.what() << '\n'; }
         }
+    }
+};
+struct ConsoleControl {
+    Handle stop{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    Handle done{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    ConsoleControl() {
+        if (!stop.value || !done.value) error("Cannot create controller stop signal");
+        console_stop = stop.value; console_done = done.value;
+        if (!SetConsoleCtrlHandler(console_handler, TRUE)) error("Cannot register console stop handler");
+    }
+    ~ConsoleControl() {
+        SetEvent(done.value);
+        SetConsoleCtrlHandler(console_handler, FALSE);
     }
 };
 void write(HANDLE file, const void* bytes, DWORD count) {
@@ -94,25 +119,32 @@ void write(HANDLE file, const void* bytes, DWORD count) {
 int wmain(int argc, wchar_t** argv) {
     try {
         // No generic injection interface: explicitly selected Overwolf host only.
-        if (argc != 5 && argc != 6) {
-            std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds:1..120> <new capture file> [all|source-channel]\n";
+        if (argc != 5 && argc != 6 && argc != 8) {
+            std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds|0=until-stop> <new capture file> [all|source-channel] [--stop-file <path>]\n";
             return 2;
         }
+        using namespace overwolf_hook::controller;
         uint32_t source_channel = OWH_ALL_CHANNELS;
-        if (argc == 6 && std::wstring_view(argv[5]) != L"all") {
-            const std::wstring value(argv[5]);
-            if (value.empty() || value.find_first_not_of(L"0123456789") != std::wstring::npos)
-                throw std::runtime_error("Source must be 'all' or a nonzero uint32 channel ID (not a game ID)");
-            std::string digits;
-            for (const wchar_t digit : value) digits.push_back(static_cast<char>(digit)); // ASCII digits validated above.
-            const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), source_channel);
-            if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || !source_channel)
+        if (argc >= 6 && std::wstring_view(argv[5]) != L"all") {
+            const auto value = number(argv[5], "Source must be 'all' or a nonzero uint32 channel ID (not a game ID)");
+            if (!value || value > UINT32_MAX)
                 throw std::runtime_error("Source channel outside 1..4294967295; use 'all' for every event channel");
+            source_channel = static_cast<uint32_t>(value);
         }
-        const DWORD pid = std::stoul(argv[1]);
+        std::filesystem::path stop_file;
+        if (argc == 8) {
+            if (std::wstring_view(argv[6]) != L"--stop-file") throw std::runtime_error("Expected --stop-file <path>");
+            stop_file = std::filesystem::absolute(argv[7]);
+            if (std::filesystem::exists(stop_file)) throw std::runtime_error("Stop file must not already exist");
+        }
+        const auto selected_pid = number(argv[1], "PID must be a nonzero uint32");
+        if (!selected_pid || selected_pid > UINT32_MAX) throw std::runtime_error("PID must be a nonzero uint32");
+        const DWORD pid = static_cast<DWORD>(selected_pid);
         const auto dll = std::filesystem::canonical(argv[2]).wstring();
-        const unsigned seconds = std::stoul(argv[3]);
-        if (!seconds || seconds > 120) throw std::runtime_error("Capture duration outside 1..120 seconds");
+        const auto seconds = number(argv[3], "Duration must be whole seconds, or 0 until stop");
+        ConsoleControl console;
+        // Validate overflow before any remote operation; no arbitrary duration cap.
+        (void)CaptureControl(seconds, console.stop.value, nullptr, stop_file);
         Handle process{OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
             PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid)};
         if (!process.value) error("Cannot open selected Overwolf process");
@@ -126,8 +158,8 @@ int wmain(int argc, wchar_t** argv) {
         if (!module(pid, L"OWGameEventsConsumer.dll").base) throw std::runtime_error("Target has no loaded consumer");
         Handle output{CreateFileW(argv[4], GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
         if (output.value == INVALID_HANDLE_VALUE) error("Output must be a new writable file");
-        HMODULE local = LoadLibraryW(dll.c_str());
-        if (!local) error("Cannot load local capture exports");
+        struct Library { HMODULE value; ~Library() { if (value) FreeLibrary(value); } } local{LoadLibraryW(dll.c_str())};
+        if (!local.value) error("Cannot load local capture exports");
         // LoadLibraryW may be forwarded into KernelBase: resolve its actual module
         // and rebase that module in the target, never assume identical ASLR bases.
         auto remote = module(pid, dll, true);
@@ -138,9 +170,9 @@ int wmain(int argc, wchar_t** argv) {
             if (!remote.base) throw std::runtime_error("Capture DLL did not load (check dependencies/target policy)");
         }
         const auto entry = [&](const char* name) {
-            const auto symbol = GetProcAddress(local, name);
+            const auto symbol = GetProcAddress(local.value, name);
             if (!symbol) error("Capture export unavailable");
-            return remote.base + reinterpret_cast<uintptr_t>(symbol) - reinterpret_cast<uintptr_t>(local);
+            return remote.base + reinterpret_cast<uintptr_t>(symbol) - reinterpret_cast<uintptr_t>(local.value);
         };
         Session session{process.value, entry("owh_probe_stop")};
         owh_probe_options options{sizeof(options), OWH_ABI_VERSION, GetCurrentProcessId(), source_channel,
@@ -157,24 +189,40 @@ int wmain(int argc, wchar_t** argv) {
         // records published between hook enable and this reader opening.
         if (owh_reader_open(1, options.channel, OWH_RETAINED, &reader.value).status != OWH_OK)
             throw std::runtime_error("Capture channel unavailable after start");
+        LARGE_INTEGER qpc{}, frequency{};
+        FILETIME utc{};
+        QueryPerformanceCounter(&qpc); QueryPerformanceFrequency(&frequency); GetSystemTimePreciseAsFileTime(&utc);
+        const uint64_t filetime = (uint64_t{utc.dwHighDateTime} << 32) | utc.dwLowDateTime;
         std::cout << "hook enabled; channel=" << options.channel
             << "; source=" << (source_channel ? std::to_string(source_channel) : "all")
-            << "; capture " << seconds << " seconds\n" << std::flush;
-        const ULONGLONG deadline = GetTickCount64() + seconds * 1000ull;
+            << "; capture=" << (seconds ? std::to_string(seconds) + " seconds" : "until-stop")
+            << "; host_pid=" << pid << "; host_started=" << created(process.value)
+            << "; started_qpc=" << qpc.QuadPart << "; qpc_frequency=" << frequency.QuadPart
+            << "; started_filetime_utc=" << filetime << '\n' << std::flush;
+        CaptureControl capture_control(seconds, console.stop.value, process.value, stop_file);
         uint64_t received = 0, lost = 0;
         bool stopped = false;
+        bool target_exited = false;
+        ULONGLONG drain_deadline = 0;
         DWORD stop_result = OWH_OK;
         for (;;) {
-            if (!stopped && GetTickCount64() >= deadline) {
-                stop_result = call(process.value, session.stop);
-                session.started = stop_result != OWH_OK;
+            const auto reason = capture_control.reason();
+            if (!stopped && reason != StopReason::None) {
+                target_exited = reason == StopReason::TargetExited;
+                stop_result = target_exited ? OWH_CLOSED : call(process.value, session.stop);
+                session.started = !target_exited && stop_result != OWH_OK;
+                if (target_exited) stop_result = OWH_OK;
                 if (stop_result != OWH_OK)
                     throw std::runtime_error("Capture did not stop: " + std::to_string(stop_result));
                 stopped = true;
+                drain_deadline = GetTickCount64() + 10000;
             }
             owh_probe_frame frame{}; owh_record record{};
             const auto result = owh_reader_next(reader.value, &frame, sizeof(frame), &record);
-            if (result.status == OWH_NO_DATA || result.status == OWH_BUSY) { Sleep(1); continue; }
+            if (result.status == OWH_NO_DATA || result.status == OWH_BUSY) {
+                if (stopped && GetTickCount64() >= drain_deadline) throw std::runtime_error("Capture drain timed out");
+                Sleep(1); continue;
+            }
             if (result.status == OWH_CLOSED) break;
             if (result.status != OWH_OK || record.size != sizeof(frame))
                 throw std::runtime_error("Invalid capture read: " + std::to_string(result.status));
@@ -187,6 +235,15 @@ int wmain(int argc, wchar_t** argv) {
                 std::cout << "event " << record.sequence << " source=" << frame.source_channel
                     << ": " << event << '\n' << std::flush;
             }
+        }
+        if (!FlushFileBuffers(output.value)) error("Cannot flush capture file");
+        // The host may exit after CLOSED is read but before diagnostics are queried.
+        if (capture_control.reason() == StopReason::TargetExited) target_exited = true;
+        if (target_exited) {
+            session.started = false;
+            std::cout << "received=" << received << " bridge_overwrites=" << lost
+                << " target_exited=1 diagnostics=unavailable\n";
+            return 0;
         }
         if (!stopped) {
             stop_result = call(process.value, session.stop);
@@ -203,7 +260,6 @@ int wmain(int argc, wchar_t** argv) {
             << " seen=" << statistics.seen << " forwarded=" << statistics.forwarded << " rejected=" << statistics.rejected
             << " filtered=" << statistics.filtered << " invalid=" << statistics.invalid << " active=" << statistics.active_calls
             << " enabled=" << statistics.hook_enabled << " stop=" << stop_result << '\n';
-        FreeLibrary(local);
         return stop_result == OWH_OK && !statistics.hook_enabled && !statistics.active_calls ? 0 : 1;
     } catch (const std::exception& problem) { std::cerr << problem.what() << '\n'; return 1; }
 }

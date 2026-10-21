@@ -1,5 +1,5 @@
-#ifndef OVERWOLF_EVENT_HOOK_PROBE_H
-#define OVERWOLF_EVENT_HOOK_PROBE_H
+#ifndef OVERWOLF_HOOK_PROBE_H
+#define OVERWOLF_HOOK_PROBE_H
 #include "bridge.h"
 #ifdef __cplusplus
 extern "C" {

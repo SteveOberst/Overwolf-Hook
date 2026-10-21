@@ -11,6 +11,7 @@ State reads own their data; event readers have independent cursors.
 
 The broader API and `OverwolfHook` names below require version 0.2.0-beta.1 or newer.
 Release 0.1.0-beta.1 contains only the former `OverwolfEventHook` event API.
+Channel discovery and the stoppable recorders require version 0.3.0-beta.1 or newer.
 
 **Experimental:** the event hook targets one reviewed consumer build. The state
 reader targets one reviewed classic InfoDB layout. Synthetic tests establish
@@ -21,7 +22,8 @@ reader still needs live match validation.
 ## Build
 
 Requires Windows x64, Visual Studio 2022 or newer with C++ tools/Windows SDK,
-and CMake 3.25+. Java 25 is needed only for the optional FFM example/test.
+and CMake 3.25+. Python 3 is required for tests and the recording inspector;
+Java 25 is needed only for the optional FFM example/test.
 
 ```powershell
 git clone https://github.com/SteveOberst/Overwolf-Hook.git
@@ -37,7 +39,7 @@ For Visual Studio 2026 use `-G "Visual Studio 18 2026"`, or the included
 MinHook is fetched automatically through CMake FetchContent with a pinned hash.
 No manual ZIP, checkout, Overwolf SDK or running game is needed to build.
 
-The installed package contains `owh_capture.dll`, `owh_client.dll`, `owh_probe.exe`,
+The installed package contains `owh_capture.dll`, `owh_client.dll`, `owh_probe.exe`, `owh_info.exe`,
 C headers, CMake targets and license notices. The DLLs use the Microsoft C++
 runtime; install the x64 Visual C++ Redistributable if it is missing.
 
@@ -75,16 +77,85 @@ not establish a known gameplay value. A retained value does not prove an active
 selection phase or even a live match. Changes between reads may collapse into
 the latest value; this is not a change-history API.
 
-Source channels are internal transport IDs, not public game IDs. The event frames
-below retain observed source channels. Automatic enumeration of persistent-only
-channels is not implemented. Readers must establish the relevant source lifetime;
-each state read itself releases every provider handle before returning.
+Source channels are internal transport IDs, not public game IDs. Readers must
+establish the relevant source lifetime; each state read releases every provider
+handle before returning. No consumer can infer a current match from a retained
+mapping alone.
 
 The installed [C state example](examples/c/read_state.c) prints keys and hex bytes:
 
 ```powershell
 ./build/example/Release/read_state.exe <source-channel>
 ```
+
+## Discover channels
+
+[discovery.h](include/overwolf_hook/discovery.h) lists the exact classic
+`ow_info_<id>` and `ow_events_<id>` Section objects in your Windows session.
+No ID range is guessed, and no foreign process is opened. The list owns only
+IDs and kind flags; it retains no provider object handles. Re-enumeration finds
+channels that appear or disappear while your application runs.
+
+```c
+owh_channels* channels = NULL;
+owh_result result = owh_channels_discover(OWH_ABI_VERSION, &channels);
+if (result.status == OWH_OK) {
+    for (uint32_t i = 0; i < owh_channels_count(channels); ++i) {
+        owh_source_channel channel = {0};
+        if (owh_channels_at(channels, i, &channel).status == OWH_OK) {
+            /* channel.kinds: OWH_CHANNEL_INFO and/or OWH_CHANNEL_EVENTS */
+        }
+    }
+    owh_channels_close(channels);
+}
+```
+
+The [C discovery example](examples/c/list_channels.c) prints the list. The
+installed CLI can also list channels or read one without installing a hook:
+
+```powershell
+./out/install/bin/owh_info.exe list
+./out/install/bin/owh_info.exe read <source-channel>
+```
+
+Discovery reports **mapping presence**, not read permission, layout compatibility,
+an active producer, a public game ID or a live match. Read results remain separate.
+Enumeration is not atomic; a source may vanish immediately afterward. A successful
+empty list is distinct from a discovery error (for example access denied under a
+restricted process token). No administrator elevation is requested automatically.
+The implementation dynamically looks up Microsoft's
+[NtOpenDirectoryObject](https://learn.microsoft.com/en-us/windows/win32/devnotes/ntopendirectoryobject)
+and [NtQueryDirectoryObject](https://learn.microsoft.com/en-us/windows/win32/devnotes/ntquerydirectoryobject);
+unavailable functions fail explicitly rather than yielding an empty list.
+
+## Record current state
+
+The state recorder repeatedly discovers InfoDB channels and records changed
+values, errors, disappearance and reappearance. Unknown names/values are retained.
+It polls every 250 ms; intermediate updates can collapse into the latest value.
+There is no delivery guarantee or inferred game-state freshness.
+
+```powershell
+./out/install/bin/owh_info.exe watch 0 "$PWD/state.jsonl" --stop-file "$PWD/capture.STOP"
+```
+
+Use `0` to run until stopped, or any representable positive duration in seconds.
+Ctrl+C/Ctrl+Break or creating the specified stop file requests a clean stop.
+The output must be new, and the stop file must not exist at startup. Parent
+directories must already exist. Output grows until stop or a reported write
+failure; provision disk space for your recording.
+
+The JSONL header identifies `owh-infodb-jsonl-1` and QPC frequency. Each changed
+source record includes reception QPC, UTC Windows FILETIME, source channel,
+status and original Win32 error. Successful records include complete fields with
+`category_hex`, `key_hex`, `value_hex`, original `producer_ticks` and reservation
+sizes. Hex preserves non-UTF-8 names and binary payloads. Disappearance uses
+`removed: true`; discovery failures use `discovery_status` and clear the comparison
+baseline. An error is never an empty successful state. A clean exit appends
+`stopped_filetime_utc`; its absence means completion was not confirmed. Timestamp
+changes are retained even when value bytes match. Original timestamps are not
+converted into game time. State snapshots are not correlated with a particular
+match by this tool.
 
 ## Capture events
 
@@ -97,10 +168,30 @@ Get-Process Overwolf | Select-Object Id
 python tools/inspect_capture.py events.bin
 ```
 
-Replace `<PID>` with the displayed process ID. The CLI accepts a duration of
-1–120 seconds and requires a new output file. It prints its channel name,
-sample event names and capture counters, then stops the hook and drains the
-reader. Keep the DLL path unchanged while Overwolf is running.
+Replace `<PID>` with the displayed process ID. Use any representable positive
+duration in seconds, or `0` for capture until stopped. The output file must be new.
+The CLI prints its channel, host process identity, QPC/UTC timing anchor, sample
+event names and final counters. Keep its stdout/stderr beside the raw recording.
+It stops the hook and drains the reader at the deadline, on Ctrl+C/Ctrl+Break or
+when the selected host exits. Keep the DLL path unchanged while Overwolf runs.
+
+An explicit stop file also works for a controller started without an interactive
+console. It can be shared with the state recorder:
+
+```powershell
+./out/install/bin/owh_probe.exe <PID> "$PWD/out/install/bin/owh_capture.dll" 0 "$PWD/events.bin" all --stop-file "$PWD/capture.STOP"
+# In another terminal, run the state-recorder command above.
+# Stop both from a third terminal:
+New-Item -ItemType File "$PWD/capture.STOP"
+```
+
+Each controller requires that stop file to be absent when it starts. Delete it
+yourself before a new capture. The tool never deletes caller files. Graceful stop
+flushes output and drains forwarded event records. If Overwolf exits, retained
+bridge records are drained and final provider diagnostics are explicitly
+unavailable. No new hook is silently installed into a replacement process; start
+a new controller for a new host. Ordinary match/provider channel changes within
+the same host are covered by all-channel capture and repeated state discovery.
 
 By default, capture includes all `ow_events_<channel>` services read by the
 reviewed consumer, including channels that appear after capture starts. Every
@@ -125,8 +216,9 @@ change authorization settings, or wait on Overwolf's notification events.
 Capture and consumer DLLs remain resident until Overwolf exits, even after the
 hook stops. This avoids unloading code while a callback might still reference it.
 The original call, return value and `LastError` are retained. The native worker
-watches the controller process and requests shutdown if it exits; abrupt-owner
-failure handling still needs dedicated live testing.
+watches the controller process and requests shutdown if it exits. Owned-host
+tests cover abrupt controller death, entry restoration and subsequent restart;
+this does not certify every real-host shutdown circumstance.
 
 ## Use from C/C++
 
@@ -180,6 +272,13 @@ java --enable-native-access=ALL-UNNAMED examples/java/FfmStateRead.java "$PWD/ou
 The state example loads only the client DLL in your own JVM. It needs an existing
 provider channel; it does not load the capture DLL or modify Overwolf.
 
+[FfmChannels.java](examples/java/FfmChannels.java) discovers current source
+channels with the same client DLL:
+
+```powershell
+java --enable-native-access=ALL-UNNAMED examples/java/FfmChannels.java "$PWD/out/install/bin/owh_client.dll"
+```
+
 ### Fetch from Gradle
 
 The release ZIP can be a Gradle Ivy dependency. This coordinate describes a
@@ -211,7 +310,7 @@ val overwolfHook by configurations.creating {
     isTransitive = false
 }
 dependencies {
-    add(overwolfHook.name, "dev.sxlver.native:overwolf-hook:0.2.0-beta.1") {
+    add(overwolfHook.name, "dev.sxlver.native:overwolf-hook:0.3.0-beta.1") {
         artifact { classifier = "windows-x64"; type = "zip"; extension = "zip" }
     }
 }
@@ -281,18 +380,27 @@ not establish complete tracker or Arena-offer support.
 
 ## Tests and releases
 
-CI runs the transport, passive-state, process-lifecycle and MinHook tests in
-Debug/Release, compiles the installed C examples, and runs the JVM example.
-No test injects into a running third-party process. An optional owned-host test
-executes the real consumer reader against synthetic layout storage:
+CI runs transport, discovery, state recording, stop/lifecycle and MinHook tests
+in Debug/Release, compiles the installed C examples, and runs the JVM examples.
+Recorder tests retain opaque bytes and check errors/removal/reappearance and
+stop behavior. The inspector streams large recordings without retaining every
+sequence number in memory. No test injects into a running third-party process.
+Optional owned-host tests execute the real consumer reader against synthetic
+layout storage and exercise the controller through stop/restart, console stop,
+hard controller death and host exit:
 
 ```powershell
 cmake -S . -B build "-DOWH_REVIEWED_CONSUMER=C:/path/to/OWGameEventsConsumer.dll"
 ```
 
-Enable the JVM test with `-DOWH_FFM_TESTS=ON` and, if necessary,
+These optional tests require your local reviewed DLL; it is never downloaded or
+redistributed. Their synthetic gameplay inputs are not real-match validation.
+
+Enable the JVM tests with `-DOWH_FFM_TESTS=ON` and, if necessary,
 `-DJava_JAVA_EXECUTABLE=C:/path/to/java.exe`. Set `OWH_OVERWOLF_PROBE=OFF` to
-build only the bridge; also disable `OWH_HOOK_TESTS` to avoid MinHook completely.
+build the bridge/state/discovery APIs and state CLI without the event hook;
+also disable `OWH_HOOK_TESTS` to avoid MinHook completely. Use `BUILD_TESTING=OFF`
+for a library-only build without test prerequisites.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
 `fix:` for fixes, `feat:` for features, and `!` / `BREAKING CHANGE:` for breaking

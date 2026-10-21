@@ -14,7 +14,8 @@ FRAME_SIZE = (FRAME.size + RAW_SIZE + 7) & ~7  # Reviewed native x64 alignment.
 
 def inspect(path: Path):
     names = Counter()
-    sequences = []
+    count = 0
+    first_sequence = None
     channels = set()
     lost = 0
     previous = 0
@@ -33,7 +34,7 @@ def inspect(path: Path):
                 raise ValueError("Truncated probe frame")
             qpc, channel, raw_size = FRAME.unpack_from(frame)
             expected_gap = sequence - previous - 1
-            if raw_size != RAW_SIZE or gap > expected_gap or (previous and expected_gap != gap):
+            if not channel or raw_size != RAW_SIZE or gap > expected_gap or (previous and expected_gap != gap):
                 raise ValueError("Inconsistent raw size or sequence-gap accounting")
             if not previous:
                 unavailable_prefix = expected_gap - gap
@@ -41,7 +42,9 @@ def inspect(path: Path):
             # Names are a display projection; the file retains the complete bytes.
             name = raw[:255].split(b"\0", 1)[0].decode("utf-8", errors="backslashreplace")
             names[name] += 1
-            sequences.append(sequence)
+            count += 1
+            if first_sequence is None:
+                first_sequence = sequence
             channels.add(channel)
             lost += gap
             if first_qpc is None:
@@ -52,9 +55,9 @@ def inspect(path: Path):
             digest.update(frame)
     return {
         "format": "owh experimental x64 record + frame, ABI 1",
-        "records": len(sequences),
-        "first_sequence": sequences[0] if sequences else None,
-        "last_sequence": sequences[-1] if sequences else None,
+        "records": count,
+        "first_sequence": first_sequence,
+        "last_sequence": previous if count else None,
         "bridge_overwrites": lost,
         "records_before_reader_retention_boundary": unavailable_prefix,
         "channels": sorted(channels),

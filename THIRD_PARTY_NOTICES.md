@@ -2,7 +2,7 @@
 
 Overwolf Hook's original code is licensed under MIT; see [LICENSE](LICENSE).
 
-The capture DLL statically links [MinHook 1.3.4](https://github.com/TsudaKageyu/minhook/tree/v1.3.4),
+When the event hook is enabled, the capture DLL statically links [MinHook 1.3.4](https://github.com/TsudaKageyu/minhook/tree/v1.3.4),
 licensed under BSD-2-Clause. Its bundled instruction decoder also carries notices
 included in the upstream license file. The complete upstream text is preserved
 in [third_party/MinHook.LICENSE.txt](third_party/MinHook.LICENSE.txt) and in binary

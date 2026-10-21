@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
+
+_Static_assert(sizeof(owh_state_field) == 40, "state field ABI");
+_Static_assert(offsetof(owh_state_field, producer_ticks) == 24, "state field ABI offsets");
 
 /* One bounded passive read. No hook or running controller is required. */
 int main(int argc, char** argv) {

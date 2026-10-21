@@ -4,6 +4,7 @@
 #include <array>
 #include <cstring>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -15,9 +16,9 @@ namespace profile = overwolf_hook::overwolf;
 template<typename T> void put(void* base, size_t offset, T value) {
     std::memcpy(static_cast<char*>(base) + offset, &value, sizeof(value));
 }
-uint64_t created() {
+uint64_t created(HANDLE process = GetCurrentProcess()) {
     FILETIME a{}, b{}, c{}, d{};
-    REQUIRE(GetProcessTimes(GetCurrentProcess(), &a, &b, &c, &d));
+    REQUIRE(GetProcessTimes(process, &a, &b, &c, &d));
     return (uint64_t{a.dwHighDateTime} << 32) | a.dwLowDateTime;
 }
 struct Fixture {
@@ -74,6 +75,22 @@ struct Fixture {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string(argv[1]) == "--owner") { Sleep(INFINITE); return 0; }
+        if (argc == 4 && std::string(argv[1]) == "--serve") {
+            // Owned remote-controller fixture only. Its target filename is set
+            // by CMake; never launches or opens a real Overwolf/game process.
+            Fixture f;
+            f.consumer = LoadLibraryExA(argv[2], nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            REQUIRE(f.consumer);
+            auto read = reinterpret_cast<uintptr_t(__fastcall*)(void*, profile::EventRange*, uintptr_t, uintptr_t)>(
+                reinterpret_cast<unsigned char*>(f.consumer) + profile::reader_rva);
+            { std::ofstream ready(argv[3]); ready << "owned fixture ready\n"; REQUIRE(ready.good()); }
+            for (;;) {
+                f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
+                REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
+                Sleep(50);
+            }
+        }
         REQUIRE(argc == 2);
         Fixture f;
         f.consumer = LoadLibraryExA(argv[1], nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -158,6 +175,36 @@ int main(int argc, char** argv) {
         REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.forwarded == 6 && stats.filtered == 1);
         REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
         REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
+        owh_reader_close(f.received); f.received = nullptr;
+        // The controller can disappear without calling stop. Use only our owned
+        // child as the owner; the OS watcher must restore the real entry bytes.
+        struct Child {
+            HANDLE process = nullptr, thread = nullptr;
+            ~Child() {
+                if (process) { TerminateProcess(process, 0); CloseHandle(process); }
+                if (thread) CloseHandle(thread);
+            }
+        } child;
+        wchar_t self[32768]; REQUIRE(GetModuleFileNameW(nullptr, self, 32768));
+        std::wstring command = L"\"" + std::wstring(self) + L"\" --owner";
+        STARTUPINFOW startup{}; startup.cb = sizeof(startup); PROCESS_INFORMATION process{};
+        REQUIRE(CreateProcessW(self, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+            nullptr, nullptr, &startup, &process));
+        child.process = process.hProcess; child.thread = process.hThread;
+        options.owner_process_id = process.dwProcessId; options.owner_started = created(child.process);
+        REQUIRE(owh_probe_start(&options) == OWH_OK);
+        REQUIRE(owh_reader_open(1, options.channel, OWH_RETAINED, &f.received).status == OWH_OK);
+        REQUIRE(TerminateProcess(child.process, 0));
+        const auto timeout = GetTickCount64() + 5000;
+        do {
+            REQUIRE(owh_probe_query(&stats) == OWH_OK);
+            if (stats.status == OWH_CLOSED && !stats.hook_enabled && !stats.active_calls) break;
+            Sleep(1);
+        } while (GetTickCount64() < timeout);
+        REQUIRE(stats.status == OWH_CLOSED && !stats.hook_enabled && !stats.active_calls);
+        REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
+        REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(f.consumer) + profile::reader_rva,
+            profile::reader_entry.data(), profile::reader_entry.size()) == 0);
         std::cout << "PASS actual consumer trampoline, channel selection, multiplexing, exact raw bytes, watermark, stop, restart, drain\n";
         return 0;
     } catch (const std::exception& error) {

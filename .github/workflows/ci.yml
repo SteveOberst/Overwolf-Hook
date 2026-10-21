@@ -23,6 +23,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Python for recorder tests
+        run: python --version
       - name: Configure
         shell: pwsh
         run: >-
