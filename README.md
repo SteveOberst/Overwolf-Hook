@@ -9,7 +9,7 @@ C/C++ and Java/Kotlin FFM: passive reads of the classic InfoDB shared memory,
 and an event hook that copies records into a separate shared-memory channel.
 State reads own their data; event readers have independent cursors.
 
-The broader API and `OverwolfHook` names below describe the next release.
+The broader API and `OverwolfHook` names below require version 0.2.0-beta.1 or newer.
 Release 0.1.0-beta.1 contains only the former `OverwolfEventHook` event API.
 
 **Experimental:** the event hook targets one reviewed consumer build. The state
@@ -179,6 +179,49 @@ java --enable-native-access=ALL-UNNAMED examples/java/FfmStateRead.java "$PWD/ou
 
 The state example loads only the client DLL in your own JVM. It needs an existing
 provider channel; it does not load the capture DLL or modify Overwolf.
+
+### Fetch from Gradle
+
+The release ZIP can be a Gradle Ivy dependency. This coordinate describes a
+GitHub release artifact; it is not a Maven publication or a Kotlin wrapper.
+In `settings.gradle.kts`, add a repository restricted to this one module:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        exclusiveContent {
+            forRepository {
+                ivy {
+                    url = uri("https://github.com/SteveOberst/Overwolf-Hook/releases/download")
+                    patternLayout { artifact("v[revision]/[artifact]-[revision]-[classifier].[ext]") }
+                    metadataSources { artifact() }
+                }
+            }
+            filter { includeModule("dev.sxlver.native", "overwolf-hook") }
+        }
+    }
+}
+```
+
+Declare a separate native configuration in `build.gradle.kts`:
+
+```kotlin
+val overwolfHook by configurations.creating {
+    isCanBeConsumed = false
+    isTransitive = false
+}
+dependencies {
+    add(overwolfHook.name, "dev.sxlver.native:overwolf-hook:0.2.0-beta.1") {
+        artifact { classifier = "windows-x64"; type = "zip"; extension = "zip" }
+    }
+}
+```
+
+Gradle retrieves and caches the ZIP. Your packaging task still needs to verify
+its SHA-256 against the release's `SHA256SUMS`, extract the required binaries
+and retain their license notices. Use the resulting client DLL path for FFM;
+do not add the ZIP to the JVM classpath. LeagueLab's Windows integration has
+tested this release retrieval, packaging and Kotlin FFM path.
 
 ## Compatibility and limits
 
