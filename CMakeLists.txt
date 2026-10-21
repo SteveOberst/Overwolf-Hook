@@ -95,6 +95,12 @@ if(BUILD_TESTING)
         add_test(NAME reviewed_consumer_hook COMMAND oet_consumer_host "${OET_REVIEWED_CONSUMER}")
         set_tests_properties(reviewed_consumer_hook PROPERTIES TIMEOUT 20)
     endif()
+    if(OET_OVERWOLF_PROBE)
+        add_executable(oet_channel_tests tests/channel_tests.cpp)
+        target_compile_features(oet_channel_tests PRIVATE cxx_std_20)
+        target_include_directories(oet_channel_tests PRIVATE src)
+        add_test(NAME event_channels COMMAND oet_channel_tests)
+    endif()
 endif()
 
 install(TARGETS oet_capture oet_client EXPORT EventTapTargets

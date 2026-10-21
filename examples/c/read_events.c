@@ -36,8 +36,9 @@ int main(int argc, char** argv) {
         char name[256] = {0};
         for (size_t i = 0; i < 255 && frame.raw[i]; ++i)
             name[i] = frame.raw[i] >= 32 && frame.raw[i] <= 126 ? (char)frame.raw[i] : '?';
-        printf("sequence=%llu lost_before=%llu event=%s\n",
-            (unsigned long long)record.sequence, (unsigned long long)record.lost_before, name);
+        printf("sequence=%llu lost_before=%llu source_channel=%u event=%s\n",
+            (unsigned long long)record.sequence, (unsigned long long)record.lost_before,
+            frame.source_channel, name);
     }
     oet_reader_close(reader);
     return exit_code;

@@ -2,11 +2,13 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
+#include <charconv>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -92,9 +94,20 @@ void write(HANDLE file, const void* bytes, DWORD count) {
 int wmain(int argc, wchar_t** argv) {
     try {
         // No generic injection interface: explicitly selected Overwolf host only.
-        if (argc != 5) {
-            std::cerr << "Usage: oet_probe <Overwolf PID> <capture DLL absolute path> <seconds:1..120> <new capture file>\n";
+        if (argc != 5 && argc != 6) {
+            std::cerr << "Usage: oet_probe <Overwolf PID> <capture DLL absolute path> <seconds:1..120> <new capture file> [all|source-channel]\n";
             return 2;
+        }
+        uint32_t source_channel = OET_ALL_CHANNELS;
+        if (argc == 6 && std::wstring_view(argv[5]) != L"all") {
+            const std::wstring value(argv[5]);
+            if (value.empty() || value.find_first_not_of(L"0123456789") != std::wstring::npos)
+                throw std::runtime_error("Source must be 'all' or a nonzero uint32 channel ID (not a game ID)");
+            std::string digits;
+            for (const wchar_t digit : value) digits.push_back(static_cast<char>(digit)); // ASCII digits validated above.
+            const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), source_channel);
+            if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || !source_channel)
+                throw std::runtime_error("Source channel outside 1..4294967295; use 'all' for every event channel");
         }
         const DWORD pid = std::stoul(argv[1]);
         const auto dll = std::filesystem::canonical(argv[2]).wstring();
@@ -106,7 +119,7 @@ int wmain(int argc, wchar_t** argv) {
         wchar_t image[32768]; DWORD length = 32768;
         if (!QueryFullProcessImageNameW(process.value, 0, image, &length)) error("Cannot identify target");
         if (_wcsicmp(std::filesystem::path(image).filename().c_str(), L"Overwolf.exe") != 0)
-            throw std::runtime_error("Target must be Overwolf.exe; League.exe is never a target");
+            throw std::runtime_error("Target must be Overwolf.exe, never a game process");
         USHORT machine, native;
         if (!IsWow64Process2(process.value, &machine, &native) || machine != IMAGE_FILE_MACHINE_UNKNOWN ||
             native != IMAGE_FILE_MACHINE_AMD64) throw std::runtime_error("Target must be native Windows x64");
@@ -130,7 +143,7 @@ int wmain(int argc, wchar_t** argv) {
             return remote.base + reinterpret_cast<uintptr_t>(symbol) - reinterpret_cast<uintptr_t>(local);
         };
         Session session{process.value, entry("oet_probe_stop")};
-        oet_probe_options options{sizeof(options), OET_ABI_VERSION, GetCurrentProcessId(), 10054261,
+        oet_probe_options options{sizeof(options), OET_ABI_VERSION, GetCurrentProcessId(), source_channel,
             created(GetCurrentProcess()), {}};
         const auto name = "overwolf-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64());
         std::memcpy(options.channel, name.c_str(), name.size() + 1);
@@ -145,7 +158,8 @@ int wmain(int argc, wchar_t** argv) {
         if (oet_reader_open(1, options.channel, OET_RETAINED, &reader.value).status != OET_OK)
             throw std::runtime_error("Capture channel unavailable after start");
         std::cout << "hook enabled; channel=" << options.channel
-            << "; selected League channel 10054261; capture " << seconds << " seconds\n" << std::flush;
+            << "; source=" << (source_channel ? std::to_string(source_channel) : "all")
+            << "; capture " << seconds << " seconds\n" << std::flush;
         const ULONGLONG deadline = GetTickCount64() + seconds * 1000ull;
         uint64_t received = 0, lost = 0;
         bool stopped = false;
@@ -170,7 +184,8 @@ int wmain(int argc, wchar_t** argv) {
                 const auto* end = std::find(frame.raw, frame.raw + 255, 0);
                 std::string event(reinterpret_cast<const char*>(frame.raw), static_cast<size_t>(end - frame.raw));
                 for (auto& c : event) if (c < 32 || c > 126) c = '?';
-                std::cout << "event " << record.sequence << ": " << event << '\n' << std::flush;
+                std::cout << "event " << record.sequence << " source=" << frame.source_channel
+                    << ": " << event << '\n' << std::flush;
             }
         }
         if (!stopped) {

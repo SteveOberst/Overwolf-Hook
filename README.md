@@ -1,11 +1,15 @@
 # Overwolf-Hook
 
-A Windows x64 library and CLI that copies Overwolf's League event records into a
-separate shared-memory channel. Consumers read through a small C ABI, including
+Capture Overwolf game events without building or running an Overwolf app. Feed
+the events into your own tools, or record them for later inspection. Overwolf
+itself must still be running with the relevant game's event provider active.
+
+The Windows x64 library and CLI copy raw event records into a separate
+shared-memory channel. Consumers read through a small C ABI, including
 Java/Kotlin through FFM. Multiple readers have independent cursors.
 
 **Experimental:** the hook targets one reviewed Overwolf consumer build. It has
-passed an owned-host test and a short live capture; complete Arena coverage,
+passed an owned-host test and a short live capture; complete per-game coverage,
 burst load and reconnect behavior have not been verified.
 
 ## Build
@@ -33,8 +37,8 @@ runtime; install the x64 Visual C++ Redistributable if it is missing.
 
 ## Capture
 
-Start Overwolf normally with League's overlay enabled, then enter a match.
-Use the PID of `Overwolf.exe`, not a browser/helper or the League process.
+Start Overwolf normally with the game's overlay enabled, then enter a game.
+Use the PID of `Overwolf.exe`, not a browser/helper or a game process.
 
 ```powershell
 Get-Process Overwolf | Select-Object Id
@@ -46,6 +50,21 @@ Replace `<PID>` with the displayed process ID. The CLI accepts a duration of
 1–120 seconds and requires a new output file. It prints its channel name,
 sample event names and capture counters, then stops the hook and drains the
 reader. Keep the DLL path unchanged while Overwolf is running.
+
+By default, capture includes all `ow_events_<channel>` services read by the
+reviewed consumer, including channels that appear after capture starts. Every
+frame retains its actual `source_channel`, so consumers can separate sources.
+An optional last argument restricts capture to one channel:
+
+```powershell
+./out/install/bin/oet_probe.exe <PID> "$PWD/out/install/bin/oet_capture.dll" 20 "$PWD/events.bin" 10054261
+```
+
+`10054261` is the channel observed in the League test, not its public Overwolf
+game ID (`5426`). Channel IDs are internal transport identities; this library
+does not assume a universal game-ID-to-channel formula. Omit the argument or
+pass `all` to avoid needing one. For in-host C ABI control, set
+`oet_probe_options.source_channel` to `OET_ALL_CHANNELS` or a specific channel.
 
 The controller loads the capture DLL into the selected Overwolf host and invokes
 explicit start/stop exports. The hook copies raw records after the original
@@ -112,11 +131,33 @@ Reader RVA: 0xa200
 
 An unreviewed file hash or unexpected entry bytes refuses this hook. A familiar
 filename is insufficient to reuse a private RVA/layout in another build.
-The current CLI selects League channel `10054261`; other channels need explicit
-configuration in the in-host options.
+The hook is game-independent at the event-channel boundary. It captures channels
+that the reviewed classic consumer actually reads; it does not start game
+providers, enable features, or support every other Overwolf transport implicitly.
+
+### Games and event availability
+
+Overwolf's [game-event support list](https://dev.overwolf.com/ow-native/live-game-data-gep/game-events-status-health/)
+is the upstream reference. Overlay support alone does not imply event support.
+Examples of games with documented Overwolf event APIs are listed below. This
+is not a claim that every game uses this hook's reviewed transport or has been
+tested with this tool.
+
+| Game | Overwolf event documentation | Hook verification |
+| --- | --- | --- |
+| League of Legends | [Events](https://dev.overwolf.com/ow-native/live-game-data-gep/supported-games/league-of-legends/) | Short live capture; full coverage unverified |
+| Fortnite | [Events](https://dev.overwolf.com/ow-native/live-game-data-gep/supported-games/fortnite/) | Not tested |
+| Apex Legends | [Events](https://dev.overwolf.com/ow-native/live-game-data-gep/supported-games/apex-legends/) | Not tested |
+| Counter-Strike 2 | [Events](https://dev.overwolf.com/ow-native/live-game-data-gep/supported-games/counter-strike-2/) | Not tested |
+
+All-channel selection and filtering are also tested with multiple synthetic
+channels through the actual reviewed consumer. That verifies multiplexing, not
+additional games' producer behavior.
+
+### Transport limits
 
 - This captures discrete events, not persistent InfoDB values or every game
-  state field. Names/payloads stay raw; no canonical League schema is claimed.
+  state field. Names/payloads stay raw; no canonical per-game schema is claimed.
 - Our ring has sequence numbers and per-reader overwrite counts. Producer loss,
   Overwolf's original ring overwrites and its consumer age filter are upstream
   and cannot be recovered here. No lossless-delivery guarantee is made.

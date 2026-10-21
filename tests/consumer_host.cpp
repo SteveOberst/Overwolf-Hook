@@ -131,7 +131,34 @@ int main(int argc, char** argv) {
             REQUIRE(oet_reader_next(f.received, &frame, sizeof(frame), &record).status == OET_OK);
         REQUIRE(oet_reader_next(f.received, &frame, sizeof(frame), &record).status == OET_CLOSED);
         REQUIRE(oet_probe_query(&stats) == OET_OK && stats.forwarded == 2 && stats.active_calls == 0);
-        std::cout << "PASS actual consumer trampoline, channel filter, exact raw bytes, local watermark, stop, restart, drain\n";
+        oet_reader_close(f.received); f.received = nullptr;
+        // A single wildcard session must preserve distinct source identities,
+        // including newly encountered channels, and reject non-event services.
+        options.source_channel = OET_ALL_CHANNELS;
+        REQUIRE(oet_probe_start(&options) == OET_OK);
+        REQUIRE(oet_reader_open(1, options.channel, OET_RETAINED, &f.received).status == OET_OK);
+        const uint32_t channels[]{900001, 900002, UINT32_MAX};
+        uint64_t sequence = 0;
+        for (const auto channel_id : channels) {
+            const auto service_name = "ow_events_" + std::to_string(channel_id);
+            std::memcpy(f.name, service_name.c_str(), service_name.size() + 1);
+            f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
+            REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
+            for (int i = 0; i < 2; ++i) {
+                REQUIRE(oet_reader_next(f.received, &frame, sizeof(frame), &record).status == OET_OK);
+                REQUIRE(frame.source_channel == channel_id && record.sequence == ++sequence);
+                REQUIRE(std::memcmp(frame.raw, f.output.data() + i * profile::raw_event_bytes,
+                    profile::raw_event_bytes) == 0);
+            }
+        }
+        std::memcpy(f.name, "ow_info_900001", sizeof("ow_info_900001"));
+        f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
+        REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
+        REQUIRE(oet_reader_next(f.received, &frame, sizeof(frame), &record).status == OET_NO_DATA);
+        REQUIRE(oet_probe_query(&stats) == OET_OK && stats.forwarded == 6 && stats.filtered == 1);
+        REQUIRE(oet_probe_stop(nullptr) == OET_OK);
+        REQUIRE(oet_reader_next(f.received, &frame, sizeof(frame), &record).status == OET_CLOSED);
+        std::cout << "PASS actual consumer trampoline, channel selection, multiplexing, exact raw bytes, watermark, stop, restart, drain\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << " (Win32 " << GetLastError() << ")\n"; return 1;
