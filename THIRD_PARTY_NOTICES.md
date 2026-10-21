@@ -12,5 +12,12 @@ MinHook's source archive is fetched by CMake with a pinned SHA-256. No Overwolf 
 Riot binaries, SDK headers, decompiler output, live recordings or game assets are
 included. The optional consumer test requires a locally supplied Overwolf DLL.
 
+The optional JVM build uses [OpenJDK jextract](https://github.com/openjdk/jextract)
+to generate FFM bindings from this project's public headers. Its downloaded build
+tool/runtime is not bundled in the library artifacts. Generator URL and SHA-256
+are pinned in [jvm/toolchain.json](jvm/toolchain.json). The Kotlin example uses the
+[Gradle Wrapper](https://github.com/gradle/gradle), licensed under Apache-2.0; its
+scripts retain the upstream copyright and license notices.
+
 Overwolf Hook is an independent project and is not affiliated with or endorsed by
 Overwolf or Riot Games.

@@ -61,6 +61,7 @@ jobs:
           release_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
           test "$release_sha" = "$VERIFIED_SHA"
           test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.zip"
+          test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.jar"
           cd out/packages
           sha256sum --check SHA256SUMS
-          gh release upload "$RELEASE_TAG" ./*.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" ./*.zip ./*.jar SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

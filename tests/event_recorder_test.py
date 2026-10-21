@@ -24,10 +24,17 @@ def wait_for(predicate, message):
 
 
 def main():
-    probe, host, consumer, capture = map(lambda p: str(Path(p).resolve()), sys.argv[1:])
+    probe, host, consumer, capture = map(lambda p: str(Path(p).resolve()), sys.argv[1:5])
+    unreviewed = sys.argv[5:] == ["--unreviewed"]
     children = []
     with tempfile.TemporaryDirectory(prefix="owh-events-") as temporary:
         root = Path(temporary)
+        if unreviewed:
+            # An inert PE overlay changes the file hash without changing loaded
+            # instructions/layout. Never modify or redistribute the source DLL.
+            changed_consumer = root / "OWGameEventsConsumer.dll"
+            changed_consumer.write_bytes(Path(consumer).read_bytes() + b"owh-owned-test-overlay")
+            consumer = str(changed_consumer)
         ready = root / "READY"
         fixture = subprocess.Popen([host, "--serve", consumer, str(ready)])
         children.append(fixture)
@@ -48,6 +55,7 @@ def main():
             def finish(controller, path):
                 stdout, stderr = controller.communicate(timeout=15)
                 assert controller.returncode == 0, (stdout, stderr)
+                assert (b"warning: consumer SHA-256 is unreviewed" in stderr) == unreviewed, stderr
                 report = inspector.inspect(path)
                 assert report["records"] > 0 and report["channels"] == [900001]
                 assert "fixture.synthetic" in report["event_names"]

@@ -29,12 +29,22 @@ jobs:
         shell: pwsh
         run: >-
           cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64
-          -DBUILD_TESTING=ON -DOWH_HOOK_TESTS=ON -DOWH_FFM_TESTS=ON
+          -DBUILD_TESTING=ON -DOWH_HOOK_TESTS=ON -DOWH_FFM_TESTS=ON -DOWH_JVM_BINDINGS=ON
           "-DJava_JAVA_EXECUTABLE=$env:JAVA_HOME/bin/java.exe"
       - name: Build
         run: cmake --build build/ci --config ${{ matrix.configuration }}
       - name: Test
         run: ctest --test-dir build/ci -C ${{ matrix.configuration }} --output-on-failure --output-junit test-results.xml
+      - name: Compile the Kotlin examples against the actual JVM artifact
+        shell: pwsh
+        run: |
+          $jar = (Get-ChildItem "build/ci/jvm/${{ matrix.configuration }}" -Filter '*.jar').FullName
+          ./examples/kotlin/gradlew.bat -p examples/kotlin installDist "-PoverwolfHookJar=$jar" --no-daemon
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/examples/kotlin/build/install/overwolf-hook-kotlin-example/lib/*" ReadStateKt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$PWD/build/ci/jvm/${{ matrix.configuration }}/test-classes" ReadState
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile the installed C example
         shell: pwsh
         run: |
@@ -51,14 +61,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $zip = Get-ChildItem out/packages -Filter '*.zip'
           if (@($zip).Count -ne 1) { throw 'Expected exactly one package' }
-          $hash = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -LiteralPath out/packages/SHA256SUMS -Value "$hash  $($zip.Name)" -Encoding ascii
+          Copy-Item build/ci/jvm/Release/*.jar out/packages/
+          $lines = Get-ChildItem out/packages -File | Where-Object { $_.Extension -in '.zip', '.jar' } | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          Set-Content -LiteralPath out/packages/SHA256SUMS -Value $lines -Encoding ascii
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.configuration == 'Release'
         with:
           name: windows-x64
           path: |
             out/packages/*.zip
+            out/packages/*.jar
             out/packages/SHA256SUMS
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

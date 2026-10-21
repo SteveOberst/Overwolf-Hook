@@ -172,10 +172,15 @@ int main(int argc, char** argv) {
     try {
         if (argc < 2) return 2;
         const std::string test = argv[1];
-        if (test == "jvm" && argc == 5) {
+        if ((test == "jvm" && argc == 5) || (test == "jvm-library" && (argc == 4 || argc == 5))) {
             Source source;
-            std::string command = "\"" + std::string(argv[2]) + "\" --enable-native-access=ALL-UNNAMED \"" +
-                argv[3] + "\" \"" + argv[4] + "\" " + std::to_string(source.channel);
+            std::string command;
+            if (test == "jvm")
+                command = "\"" + std::string(argv[2]) + "\" --enable-native-access=ALL-UNNAMED \"" +
+                    argv[3] + "\" \"" + argv[4] + "\" " + std::to_string(source.channel);
+            else
+                command = "\"" + std::string(argv[2]) + "\" --enable-native-access=ALL-UNNAMED --class-path \"" +
+                    argv[3] + "\" " + (argc == 5 ? std::string(argv[4]) : "JvmSmokeTest state") + " " + std::to_string(source.channel);
             std::vector<char> mutable_command(command.begin(), command.end()); mutable_command.push_back(0);
             STARTUPINFOA startup{}; startup.cb = sizeof(startup);
             PROCESS_INFORMATION process{};

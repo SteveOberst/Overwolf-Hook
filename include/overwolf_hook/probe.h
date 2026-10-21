@@ -11,6 +11,11 @@ extern "C" {
  *  not attempt unsafe concurrent code/trampoline unloading.
  */
 #define OWH_ALL_CHANNELS 0u
+/** Advisory review state only; structural/code validation still gates start. */
+enum {
+    OWH_PROBE_UNREVIEWED_CONSUMER = 1u,
+    OWH_PROBE_HASH_UNAVAILABLE = 2u
+};
 
 typedef struct owh_probe_options {
     uint32_t size;
@@ -35,7 +40,10 @@ typedef struct owh_probe_statistics {
     uint32_t status;
     uint32_t native_error;
     uint32_t hook_enabled;
-    uint32_t reserved;
+    /** OWH_PROBE_* flags; zero means the consumer file matches the reference hash.
+     * An unknown/unreadable hash warns but does not block structurally valid code.
+     */
+    uint32_t warnings;
 } owh_probe_statistics;
 
 /** Source-specific raw frame, not a canonical game event. Raw bytes retain
@@ -51,6 +59,11 @@ typedef struct owh_probe_frame {
 } owh_probe_frame;
 
 OWH_CAPTURE uint32_t __stdcall owh_probe_start(void* options);
+/** Idempotent graceful stop. Disables interception, waits for capture work and
+ * releases the completed session's handles. BUSY/error retains resources needed
+ * by unfinished work. Code/trampoline memory stays resident; this is not a DLL
+ * unload operation and is not safe to call from the hooked function itself.
+ */
 OWH_CAPTURE uint32_t __stdcall owh_probe_stop(void* unused);
 OWH_CAPTURE uint32_t __stdcall owh_probe_query(void* statistics);
 #ifdef __cplusplus

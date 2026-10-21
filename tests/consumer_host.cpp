@@ -1,5 +1,6 @@
 #include <overwolf_hook/probe.h>
 #include "capture/overwolf/profile.hpp"
+#include "capture/overwolf/reader.hpp"
 #include <windows.h>
 #include <array>
 #include <cstring>
@@ -83,7 +84,7 @@ int main(int argc, char** argv) {
             f.consumer = LoadLibraryExA(argv[2], nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
             REQUIRE(f.consumer);
             auto read = reinterpret_cast<uintptr_t(__fastcall*)(void*, profile::EventRange*, uintptr_t, uintptr_t)>(
-                reinterpret_cast<unsigned char*>(f.consumer) + profile::reader_rva);
+                profile::reader_address(f.consumer));
             { std::ofstream ready(argv[3]); ready << "owned fixture ready\n"; REQUIRE(ready.good()); }
             for (;;) {
                 f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
@@ -96,7 +97,7 @@ int main(int argc, char** argv) {
         f.consumer = LoadLibraryExA(argv[1], nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
         REQUIRE(f.consumer);
         auto read = reinterpret_cast<uintptr_t(__fastcall*)(void*, profile::EventRange*, uintptr_t, uintptr_t)>(
-            reinterpret_cast<unsigned char*>(f.consumer) + profile::reader_rva);
+            profile::reader_address(f.consumer));
         // A reviewed layout fixture around the actual consumer body, not a
         // reimplementation of that body's copying or timestamp selection.
         f.populate();
@@ -127,7 +128,7 @@ int main(int argc, char** argv) {
         REQUIRE(stats.calls == 3 && stats.forwarded == 2 && stats.filtered == 1 && stats.invalid == 0 && stats.hook_enabled == 1);
         REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
         REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.hook_enabled == 0 && stats.active_calls == 0);
-        REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(f.consumer) + profile::reader_rva,
+        REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(read),
             profile::reader_entry.data(), profile::reader_entry.size()) == 0);
         owh_probe_frame frame{}; owh_record record{};
         REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
@@ -173,6 +174,13 @@ int main(int argc, char** argv) {
         REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);
         REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_NO_DATA);
         REQUIRE(owh_probe_query(&stats) == OWH_OK && stats.forwarded == 6 && stats.filtered == 1);
+        DWORD running_handles = 0, stopped_handles = 0;
+        REQUIRE(GetProcessHandleCount(GetCurrentProcess(), &running_handles));
+        REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
+        REQUIRE(GetProcessHandleCount(GetCurrentProcess(), &stopped_handles));
+        // Four control handles plus the writer's mapping/mutex must be released.
+        // Our independent reader remains open and can still drain its own view.
+        REQUIRE(running_handles >= stopped_handles + 6);
         REQUIRE(owh_probe_stop(nullptr) == OWH_OK);
         REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
         owh_reader_close(f.received); f.received = nullptr;
@@ -203,7 +211,7 @@ int main(int argc, char** argv) {
         } while (GetTickCount64() < timeout);
         REQUIRE(stats.status == OWH_CLOSED && !stats.hook_enabled && !stats.active_calls);
         REQUIRE(owh_reader_next(f.received, &frame, sizeof(frame), &record).status == OWH_CLOSED);
-        REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(f.consumer) + profile::reader_rva,
+        REQUIRE(std::memcmp(reinterpret_cast<const unsigned char*>(read),
             profile::reader_entry.data(), profile::reader_entry.size()) == 0);
         std::cout << "PASS actual consumer trampoline, channel selection, multiplexing, exact raw bytes, watermark, stop, restart, drain\n";
         return 0;

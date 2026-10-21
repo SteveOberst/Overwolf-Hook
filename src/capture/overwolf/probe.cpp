@@ -1,4 +1,5 @@
 #include "profile.hpp"
+#include "reader.hpp"
 #include "channel.hpp"
 #include "transport/channel.hpp"
 #include <overwolf_hook/probe.h>
@@ -24,6 +25,7 @@ owh_writer* writer = nullptr;
 std::atomic<bool> capture_enabled{false};
 std::atomic<uint64_t> calls{0}, seen{0}, forwarded{0}, rejected{0}, filtered{0}, invalid{0}, active{0};
 std::atomic<uint32_t> status{OWH_CLOSED}, native_error{0};
+std::atomic<uint32_t> warnings{0};
 thread_local bool recursing = false;
 
 // Keep SEH isolated from C++ automatic objects requiring unwinding.
@@ -97,16 +99,16 @@ uint64_t creation_time(HANDLE process) {
     return (uint64_t{start.dwHighDateTime} << 32) | start.dwLowDateTime;
 }
 
-bool reviewed_file(HMODULE consumer) {
+uint32_t file_warnings(HMODULE consumer) {
     wchar_t path[32768]{};
-    if (!GetModuleFileNameW(consumer, path, 32768)) fail(OWH_SYSTEM_ERROR, GetLastError());
+    if (!GetModuleFileNameW(consumer, path, 32768)) return OWH_PROBE_HASH_UNAVAILABLE;
     Handle file(CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr));
-    if (file.get() == INVALID_HANDLE_VALUE) fail(OWH_SYSTEM_ERROR, GetLastError());
+    if (file.get() == INVALID_HANDLE_VALUE) return OWH_PROBE_HASH_UNAVAILABLE;
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
-        fail(OWH_SYSTEM_ERROR);
+        return OWH_PROBE_HASH_UNAVAILABLE;
     BCRYPT_HASH_HANDLE hash = nullptr;
-    bool matches = false;
+    uint32_t result = OWH_PROBE_HASH_UNAVAILABLE;
     if (BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) >= 0) {
         unsigned char bytes[16384]; DWORD count = 0; bool valid = true;
         for (;;) {
@@ -115,24 +117,25 @@ bool reviewed_file(HMODULE consumer) {
             if (BCryptHashData(hash, bytes, count, 0) < 0) { valid = false; break; }
         }
         std::array<uint8_t, 32> digest{};
-        matches = valid && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0 &&
-            digest == profile::consumer_sha256;
+        if (valid && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0)
+            result = digest == profile::consumer_sha256 ? 0 : OWH_PROBE_UNREVIEWED_CONSUMER;
         BCryptDestroyHash(hash);
     }
     BCryptCloseAlgorithmProvider(algorithm, 0);
-    return matches;
+    return result;
 }
 
 DWORD WINAPI run(void*) noexcept {
     const auto initialization = boundary([] {
         HMODULE consumer = GetModuleHandleW(L"OWGameEventsConsumer.dll");
         if (!consumer) fail(OWH_NOT_FOUND, GetLastError());
-        if (!reviewed_file(consumer)) fail(OWH_INCOMPATIBLE);
-        auto* entry = reinterpret_cast<unsigned char*>(consumer) + profile::reader_rva;
+        warnings = file_warnings(consumer);
+        auto* entry = static_cast<unsigned char*>(profile::reader_address(consumer));
         // Also check on re-enable: never overwrite another hook installed since
         // our previous session stopped.
         if (std::memcmp(entry, profile::reader_entry.data(), profile::reader_entry.size()) != 0)
-            fail(OWH_INCOMPATIBLE);
+            fail(OWH_INCOMPATIBLE, ERROR_INVALID_DATA);
+        if (hook_created && target != entry) fail(OWH_INCOMPATIBLE, ERROR_INVALID_ADDRESS);
         HMODULE pinned;
         if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
             reinterpret_cast<LPCWSTR>(&run), &pinned) ||
@@ -204,7 +207,7 @@ extern "C" OWH_CAPTURE uint32_t __stdcall owh_probe_start(void* input) {
         ready_event = Handle(CreateEventW(nullptr, TRUE, FALSE, nullptr));
         if (!stop_event.get() || !ready_event.get()) fail(OWH_SYSTEM_ERROR, GetLastError());
         calls = seen = forwarded = rejected = filtered = invalid = 0;
-        status = OWH_BUSY; native_error = 0;
+        status = OWH_BUSY; native_error = 0; warnings = 0;
         worker_thread = Handle(CreateThread(nullptr, 0, run, nullptr, 0, nullptr));
         if (!worker_thread.get()) fail(OWH_SYSTEM_ERROR, GetLastError());
         if (WaitForSingleObject(ready_event.get(), 10000) != WAIT_OBJECT_0) {
@@ -217,15 +220,24 @@ extern "C" OWH_CAPTURE uint32_t __stdcall owh_probe_start(void* input) {
 
 extern "C" OWH_CAPTURE uint32_t __stdcall owh_probe_stop(void*) {
     ControlLock lock;
-    if (!worker_thread.get()) return OWH_CLOSED;
+    if (!worker_thread.get()) return OWH_OK;
     SetEvent(stop_event.get());
     if (WaitForSingleObject(worker_thread.get(), 5000) != WAIT_OBJECT_0) return OWH_BUSY;
-    return status.load() == OWH_CLOSED ? OWH_OK : status.load();
+    const auto stopped = status.load();
+    if (stopped != OWH_CLOSED) return stopped;
+    // The worker has finished using these handles. Keep the disabled trampoline
+    // and pinned code: a thread can still be at detour entry/before ++active,
+    // or in its epilogue/after --active. Zero active calls is not an unload proof.
+    worker_thread = Handle{};
+    owner = Handle{};
+    ready_event = Handle{};
+    stop_event = Handle{};
+    return OWH_OK;
 }
 
 extern "C" OWH_CAPTURE uint32_t __stdcall owh_probe_query(void* output) {
     const owh_probe_statistics sample{calls.load(), seen.load(), forwarded.load(), rejected.load(),
         filtered.load(), invalid.load(), active.load(), status.load(), native_error.load(),
-        capture_enabled.load() ? 1u : 0u, 0};
+        capture_enabled.load() ? 1u : 0u, warnings.load()};
     return output && copy_bytes(output, &sample, sizeof(sample)) ? OWH_OK : OWH_INVALID_ARGUMENT;
 }

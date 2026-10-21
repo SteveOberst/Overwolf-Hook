@@ -12,3 +12,6 @@ __pycache__/
 *.exp
 *.log
 *.jsonl
+/examples/kotlin/.gradle/
+/examples/kotlin/.kotlin/
+/examples/kotlin/build/

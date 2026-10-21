@@ -60,6 +60,11 @@ struct RemoteBuffer {
         }
     }
     ~RemoteBuffer() { if (address) VirtualFreeEx(process, address, 0, MEM_RELEASE); }
+    void read(void* output, size_t size) const {
+        SIZE_T copied;
+        if (!ReadProcessMemory(process, address, output, size, &copied) || copied != size)
+            error("Remote diagnostics read failed");
+    }
 };
 DWORD call(HANDLE process, uintptr_t entry, RemoteBuffer* argument = nullptr) {
     Handle thread{CreateRemoteThread(process, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(entry),
@@ -118,6 +123,20 @@ void write(HANDLE file, const void* bytes, DWORD count) {
 
 int wmain(int argc, wchar_t** argv) {
     try {
+        // A distinct verb makes old controllers reject live-only use before any
+        // remote operation. It must never be mistaken for an output filename.
+        wchar_t forever[] = L"0", no_recording[] = L"-";
+        std::vector<wchar_t*> streaming;
+        if (argc >= 2 && std::wstring_view(argv[1]) == L"stream") {
+            if (argc != 4 && argc != 5 && argc != 7) {
+                std::cerr << "Usage: owh_probe stream <Overwolf PID> <capture DLL absolute path> [all|source-channel] [--stop-file <path>]\n";
+                return 2;
+            }
+            streaming = {argv[0], argv[2], argv[3], forever, no_recording};
+            for (int i = 4; i < argc; ++i) streaming.push_back(argv[i]);
+            argc = static_cast<int>(streaming.size());
+            argv = streaming.data();
+        }
         // No generic injection interface: explicitly selected Overwolf host only.
         if (argc != 5 && argc != 6 && argc != 8) {
             std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds|0=until-stop> <new capture file> [all|source-channel] [--stop-file <path>]\n";
@@ -156,8 +175,12 @@ int wmain(int argc, wchar_t** argv) {
         if (!IsWow64Process2(process.value, &machine, &native) || machine != IMAGE_FILE_MACHINE_UNKNOWN ||
             native != IMAGE_FILE_MACHINE_AMD64) throw std::runtime_error("Target must be native Windows x64");
         if (!module(pid, L"OWGameEventsConsumer.dll").base) throw std::runtime_error("Target has no loaded consumer");
-        Handle output{CreateFileW(argv[4], GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
-        if (output.value == INVALID_HANDLE_VALUE) error("Output must be a new writable file");
+        const bool record_output = streaming.empty();
+        Handle output;
+        if (record_output) {
+            output.value = CreateFileW(argv[4], GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (output.value == INVALID_HANDLE_VALUE) error("Output must be a new writable file");
+        }
         struct Library { HMODULE value; ~Library() { if (value) FreeLibrary(value); } } local{LoadLibraryW(dll.c_str())};
         if (!local.value) error("Cannot load local capture exports");
         // LoadLibraryW may be forwarded into KernelBase: resolve its actual module
@@ -183,7 +206,27 @@ int wmain(int argc, wchar_t** argv) {
         session.started = true;
         const DWORD started = call(process.value, entry("owh_probe_start"), &configuration);
         if (started == OWH_ALREADY_EXISTS) session.started = false;
-        if (started != OWH_OK) throw std::runtime_error("Probe start failed: status " + std::to_string(started));
+        owh_probe_statistics initial{};
+        RemoteBuffer initial_stats(process.value, &initial, sizeof(initial));
+        const DWORD queried = call(process.value, entry("owh_probe_query"), &initial_stats);
+        if (queried == OWH_OK) initial_stats.read(&initial, sizeof(initial));
+        if (started != OWH_OK) {
+            const char* reason = "";
+            if (started == OWH_INCOMPATIBLE) switch (initial.native_error) {
+                case ERROR_PROC_NOT_FOUND: reason = "; reader signatures not found"; break;
+                case ERROR_DUP_NAME: reason = "; reader signatures are ambiguous"; break;
+                case ERROR_INVALID_DATA: reason = "; unexpected reader entry bytes"; break;
+                case ERROR_BAD_EXE_FORMAT: reason = "; invalid consumer PE/function ranges"; break;
+                case ERROR_NOACCESS: reason = "; consumer code could not be read"; break;
+            }
+            throw std::runtime_error("Probe start failed: status " + std::to_string(started) +
+                "; native_error=" + std::to_string(initial.native_error) + reason);
+        }
+        if (queried != OWH_OK) throw std::runtime_error("Probe startup diagnostics unavailable");
+        if (initial.warnings & OWH_PROBE_UNREVIEWED_CONSUMER)
+            std::cerr << "warning: consumer SHA-256 is unreviewed; signatures passed but compatibility is untested and capture may crash the host\n" << std::flush;
+        if (initial.warnings & OWH_PROBE_HASH_UNAVAILABLE)
+            std::cerr << "warning: consumer SHA-256 could not be checked; signatures passed but compatibility is untested and capture may crash the host\n" << std::flush;
         struct Reader { owh_reader* value = nullptr; ~Reader() { owh_reader_close(value); } } reader;
         // The newly created channel contains this capture session only. Include
         // records published between hook enable and this reader opening.
@@ -196,6 +239,7 @@ int wmain(int argc, wchar_t** argv) {
         std::cout << "hook enabled; channel=" << options.channel
             << "; source=" << (source_channel ? std::to_string(source_channel) : "all")
             << "; capture=" << (seconds ? std::to_string(seconds) + " seconds" : "until-stop")
+            << "; recording=" << (record_output ? "on" : "off")
             << "; host_pid=" << pid << "; host_started=" << created(process.value)
             << "; started_qpc=" << qpc.QuadPart << "; qpc_frequency=" << frequency.QuadPart
             << "; started_filetime_utc=" << filetime << '\n' << std::flush;
@@ -226,7 +270,9 @@ int wmain(int argc, wchar_t** argv) {
             if (result.status == OWH_CLOSED) break;
             if (result.status != OWH_OK || record.size != sizeof(frame))
                 throw std::runtime_error("Invalid capture read: " + std::to_string(result.status));
-            write(output.value, &record, sizeof(record)); write(output.value, &frame, sizeof(frame));
+            if (record_output) {
+                write(output.value, &record, sizeof(record)); write(output.value, &frame, sizeof(frame));
+            }
             ++received; lost += record.lost_before;
             if (received <= 5) {
                 const auto* end = std::find(frame.raw, frame.raw + 255, 0);
@@ -236,7 +282,7 @@ int wmain(int argc, wchar_t** argv) {
                     << ": " << event << '\n' << std::flush;
             }
         }
-        if (!FlushFileBuffers(output.value)) error("Cannot flush capture file");
+        if (record_output && !FlushFileBuffers(output.value)) error("Cannot flush capture file");
         // The host may exit after CLOSED is read but before diagnostics are queried.
         if (capture_control.reason() == StopReason::TargetExited) target_exited = true;
         if (target_exited) {
