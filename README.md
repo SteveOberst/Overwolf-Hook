@@ -64,8 +64,8 @@ The JVM JAR bundles the matching native binaries and a small API built on
 generated FFM bindings. Applications need Java 25 and native access enabled;
 they do not need jextract, JNI code or runtime dependencies.
 
-The published **v0.3.0-beta.1 contains only the native ZIP**. For the JVM API, use a
-release containing the JAR or [build it locally](#build-the-jvm-artifact-locally).
+The JVM API requires **v0.4.0-beta.1 or newer**. Download the JAR release asset or
+[build it locally](#build-the-jvm-artifact-locally).
 See [Gradle setup](#fetch-from-gradle) for release-asset dependencies.
 
 ### Find channels and read state
@@ -338,7 +338,7 @@ before another run. Event records are drained on graceful stop and host exit;
 final provider diagnostics are unavailable after host exit.
 
 The broader native API requires v0.2.0-beta.1+, discovery and stoppable recording
-require v0.3.0-beta.1+, and `stream` requires a build with live-only capture support.
+require v0.3.0-beta.1+, and the JVM SDK and live-only `stream` command require v0.4.0-beta.1+.
 
 ## Build
 
