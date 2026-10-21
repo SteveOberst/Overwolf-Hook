@@ -83,10 +83,12 @@ def main():
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             await_row(path, lambda r: r.get("format") == "owh-infodb-jsonl-1")
+            await_row(path, lambda r: r.get("discovery_status") == 0 and "info_channels" in r)
             source = Source(channel)
             initial = await_row(path, lambda r: r.get("source_channel") == channel and r.get("status") == 0)
             assert initial["fields"] == [{"category_hex": b"fixture".hex(), "key_hex": b"opaque".hex(),
                 "producer_ticks": "1", "reserved_bytes": 8, "value_hex": "ff008042"}]
+            await_row(path, lambda r: channel in r.get("info_channels", []))
             source.write(2)
             await_row(path, lambda r: r.get("source_channel") == channel and
                       r.get("fields", [{}])[0].get("producer_ticks") == "2")

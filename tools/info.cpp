@@ -6,6 +6,7 @@
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <vector>
 
 namespace {
 HANDLE requested = nullptr;
@@ -104,6 +105,8 @@ int wmain(int argc, wchar_t** argv) {
         LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
         write("{\"format\":\"owh-infodb-jsonl-1\",\"qpc_frequency\":\"" + std::to_string(frequency.QuadPart) + "\",\"started_filetime_utc\":\"" + std::to_string(utc()) + "\"}\n");
         std::map<uint32_t, std::string> previous;
+        std::vector<uint32_t> known_channels;
+        bool enumeration_known = false;
         bool discovery_failed = false;
         std::cout << "info recording started\n" << std::flush;
         while (control.reason() == StopReason::None) {
@@ -113,19 +116,28 @@ int wmain(int argc, wchar_t** argv) {
             const auto time = "\"received_qpc\":\"" + std::to_string(now.QuadPart) + "\",\"filetime_utc\":\"" + std::to_string(utc()) + "\"";
             if (result.status != OWH_OK) {
                 write("{" + time + ",\"discovery_status\":" + std::to_string(result.status) + ",\"native_error\":" + std::to_string(result.native_error) + "}\n");
-                previous.clear(); discovery_failed = true;
+                previous.clear(); discovery_failed = true; enumeration_known = false;
             } else {
                 if (discovery_failed) { write("{" + time + ",\"discovery_status\":0}\n"); discovery_failed = false; }
                 std::map<uint32_t, std::string> current;
+                std::vector<uint32_t> discovered;
                 for (uint32_t i = 0; i < owh_channels_count(channels.value); ++i) {
                     owh_source_channel channel{};
                     if (owh_channels_at(channels.value, i, &channel).status != OWH_OK) throw std::runtime_error("Invalid discovered channel");
                     if (!(channel.kinds & OWH_CHANNEL_INFO)) continue;
+                    discovered.push_back(channel.source_channel);
                     auto value = read(channel.source_channel);
                     const auto found = previous.find(channel.source_channel);
                     if (found == previous.end() || found->second != value)
                         write("{" + time + ",\"source_channel\":" + std::to_string(channel.source_channel) + ',' + value + "}\n");
                     current.emplace(channel.source_channel, std::move(value));
+                }
+                if (!enumeration_known || discovered != known_channels) {
+                    std::ostringstream inventory;
+                    inventory << '{' << time << ",\"discovery_status\":0,\"info_channels\":[";
+                    for (size_t i = 0; i < discovered.size(); ++i) { if (i) inventory << ','; inventory << discovered[i]; }
+                    inventory << "]}\n"; write(inventory.str());
+                    known_channels = std::move(discovered); enumeration_known = true;
                 }
                 for (const auto& [id, value] : previous) {
                     (void)value;

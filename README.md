@@ -151,7 +151,9 @@ status and original Win32 error. Successful records include complete fields with
 `category_hex`, `key_hex`, `value_hex`, original `producer_ticks` and reservation
 sizes. Hex preserves non-UTF-8 names and binary payloads. Disappearance uses
 `removed: true`; discovery failures use `discovery_status` and clear the comparison
-baseline. An error is never an empty successful state. A clean exit appends
+baseline. An error is never an empty successful state. `info_channels` records
+successful discovery at startup and whenever its result changes, including a
+confirmed empty list. A clean exit appends
 `stopped_filetime_utc`; its absence means completion was not confirmed. Timestamp
 changes are retained even when value bytes match. Original timestamps are not
 converted into game time. State snapshots are not correlated with a particular
