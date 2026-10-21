@@ -1,12 +1,7 @@
 # Overwolf-Hook
 
-Capture Overwolf's League of Legends game events without building or running an
-Overwolf app. Feed those events into your own tools, or record them for later
-inspection. Overwolf itself must still be running with League's overlay enabled;
-this tool reads events produced by its existing event collector.
-
-The Windows x64 library and CLI copy those event records into a separate
-shared-memory channel. Consumers read through a small C ABI, including
+A Windows x64 library and CLI that copies Overwolf's League event records into a
+separate shared-memory channel. Consumers read through a small C ABI, including
 Java/Kotlin through FFM. Multiple readers have independent cursors.
 
 **Experimental:** the hook targets one reviewed Overwolf consumer build. It has
