@@ -1,5 +1,5 @@
-#ifndef OVERWOLF_EVENT_HOOK_BRIDGE_H
-#define OVERWOLF_EVENT_HOOK_BRIDGE_H
+#ifndef OVERWOLF_HOOK_BRIDGE_H
+#define OVERWOLF_HOOK_BRIDGE_H
 
 #include <stdint.h>
 
