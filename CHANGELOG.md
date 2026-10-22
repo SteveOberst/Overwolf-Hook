@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.4.0-beta.1...v0.5.0-beta.1) (2026-10-22)
+
+
+### Features
+
+* add signalled event reception and coroutine SDK ([changes](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.4.0-beta.1...v0.5.0-beta.1))
+
+
+### Bug Fixes
+
+* wake capture startup when its controller exits ([changes](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.4.0-beta.1...v0.5.0-beta.1))
+
 ## [0.4.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.3.0-beta.1...v0.4.0-beta.1) (2026-10-21)
 
 
