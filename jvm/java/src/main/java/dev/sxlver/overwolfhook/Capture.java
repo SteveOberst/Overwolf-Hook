@@ -66,6 +66,12 @@ public final class Capture implements AutoCloseable {
             var builder = new ProcessBuilder(arguments)
                 .redirectErrorStream(true).redirectOutput(directory.resolve("controller.log").toFile());
             session = new Capture(owner, owner.start(builder), directory);
+            // A rejected controller can exit between isAlive() and the directory
+            // wait without another file change. Process exit must wake that wait.
+            session.controller.onExit().thenRun(() -> {
+                try { updates.close(); }
+                catch (IOException ignored) { /* The owning try-with-resources also closes it. */ }
+            });
             long started = System.nanoTime();
             while (true) {
                 String diagnostics = session.diagnostics();
@@ -80,7 +86,11 @@ public final class Capture implements AutoCloseable {
                 if (!session.controller.isAlive()) throw new IOException("Overwolf capture did not start: " + diagnostics);
                 if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(35)) throw new IOException("Overwolf capture startup timed out: " + diagnostics);
                 long remaining = TimeUnit.SECONDS.toNanos(35) - (System.nanoTime() - started);
-                var change = updates.poll(Math.max(0, remaining), TimeUnit.NANOSECONDS);
+                WatchKey change;
+                try { change = updates.poll(Math.max(0, remaining), TimeUnit.NANOSECONDS); }
+                catch (ClosedWatchServiceException exited) {
+                    throw new IOException("Overwolf capture did not start: " + session.diagnostics(), exited);
+                }
                 if (change != null) {
                     change.pollEvents();
                     if (!change.reset()) throw new IOException("Capture startup directory became unavailable");

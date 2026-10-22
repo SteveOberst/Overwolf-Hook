@@ -102,8 +102,14 @@ public class JvmSmokeTest {
         }
         try { hook.events("nonexistent-owned-" + System.nanoTime()); throw new AssertionError(); }
         catch (NativeFailure missing) { require(missing.status() == OWH_NOT_FOUND()); }
-        try { hook.capture(ProcessHandle.current().pid()); throw new AssertionError(); }
-        catch (IOException expected) { require(!expected.getMessage().isBlank()); }
+        // Fast controller rejection races directory notifications with process
+        // exit. It must not leave startup waiting for its 35-second deadline.
+        long rejectedAt = System.nanoTime();
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            try { hook.capture(ProcessHandle.current().pid()); throw new AssertionError(); }
+            catch (IOException expected) { require(expected.getMessage().contains("did not start")); }
+        }
+        require(System.nanoTime() - rejectedAt < java.util.concurrent.TimeUnit.SECONDS.toNanos(10));
         System.out.println("PASS embedded JAR, generated event layouts, overflow, no-data/closed, cross-thread close, error preservation and negative capture target");
     }
 }
