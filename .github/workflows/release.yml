@@ -62,6 +62,8 @@ jobs:
           test "$release_sha" = "$VERIFIED_SHA"
           test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.zip"
           test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.jar"
+          test -f "out/packages/overwolf-hook-kotlin-${RELEASE_TAG#v}.jar"
+          test -f "out/packages/overwolf-hook-kotlin-${RELEASE_TAG#v}.ivy.xml"
           cd out/packages
           sha256sum --check SHA256SUMS
-          gh release upload "$RELEASE_TAG" ./*.zip ./*.jar SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" ./*.zip ./*.jar ./*.ivy.xml SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

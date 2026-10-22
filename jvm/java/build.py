@@ -1,4 +1,4 @@
-"""Generate bindings from public headers, compile the JVM facade and package matching native binaries.
+"""Generate bindings from public headers, compile the Java SDK and package matching native binaries.
 
 Only needed by library builders. The resulting JAR needs Java 25, no jextract or third-party JVM libraries.
 """
@@ -21,7 +21,8 @@ def main():
     parser.add_argument("--java-home", type=Path, default=os.environ.get("JAVA_HOME"))
     parser.add_argument("--jextract", type=Path, help="Override the pinned downloaded generator")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    module = Path(__file__).resolve().parent
+    root = module.parent.parent
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     if args.java_home is None:
@@ -29,7 +30,7 @@ def main():
     java = Path(args.java_home).resolve() / "bin"
     generator = args.jextract
     if generator is None:
-        config = json.loads((root / "jvm/toolchain.json").read_text())
+        config = json.loads((module / "toolchain.json").read_text())
         tools = output / "toolchain"
         tools.mkdir(exist_ok=True)
         generator = tools / "jextract-25/bin/jextract.bat"
@@ -63,7 +64,7 @@ def main():
             shutil.rmtree(target)
     subprocess.run(common + ["@" + str(selected), "--target-package", "dev.sxlver.overwolfhook.bindings",
                             "--output", str(generated)] + list(map(str, headers)), check=True)
-    sources = sorted(generated.rglob("*.java")) + sorted((root / "jvm/src/main/java").rglob("*.java"))
+    sources = sorted(generated.rglob("*.java")) + sorted((module / "src/main/java").rglob("*.java"))
     classes.mkdir(exist_ok=True)
     arguments = output / "javac.args"
     arguments.write_text("\n".join('"' + str(path).replace("\\", "/") + '"' for path in sources), encoding="utf-8")
@@ -84,7 +85,7 @@ def main():
     test_classes = output / "test-classes"
     test_classes.mkdir(exist_ok=True)
     examples = sorted((root / "examples/java").glob("*.java"))
-    tests = sorted((root / "jvm/src/test/java").glob("*.java"))
+    tests = sorted((module / "src/test/java").glob("*.java"))
     subprocess.run([str(java / "javac.exe"), "--release", "25", "--class-path", str(package), "-d", str(test_classes)] + list(map(str, examples + tests)), check=True)
     print(package)
 

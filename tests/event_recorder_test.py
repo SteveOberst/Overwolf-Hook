@@ -61,6 +61,26 @@ def main():
                 assert "fixture.synthetic" in report["event_names"]
                 return stdout
 
+            # No producer events: stop-file notification must wake a controller
+            # blocked indefinitely in receive. A deadline must do so as well.
+            silent_ready = root / "SILENT_READY"
+            silent = subprocess.Popen([host, "--serve-silent", consumer, str(silent_ready)])
+            children.append(silent)
+            wait_for(silent_ready.exists, "silent host not ready")
+            for name, seconds in [("silent-stop", "0"), ("silent-deadline", "1")]:
+                path, stop = root / (name + ".bin"), root / (name + ".STOP")
+                controller = subprocess.Popen([probe, str(silent.pid), capture, seconds, str(path), "all", "--stop-file", str(stop)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                children.append(controller)
+                line = controller.stdout.readline()
+                assert line.startswith(b"hook enabled; channel="), (line, controller.communicate(timeout=10))
+                if seconds == "0":
+                    stop.touch()
+                stdout, stderr = controller.communicate(timeout=10)
+                assert controller.returncode == 0, (line, stdout, stderr)
+                assert path.stat().st_size == 0 and b"enabled=0" in stdout, stdout
+            silent.kill(); silent.wait(timeout=5)
+
             # Native long capture remains live until our stop request, not an arbitrary cap.
             controller, path, stop = start("explicit-stop", "600")
             stop.touch()

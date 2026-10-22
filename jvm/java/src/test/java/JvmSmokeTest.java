@@ -14,6 +14,17 @@ public class JvmSmokeTest {
     public static void main(String[] args) throws Exception {
         var hook = OverwolfHook.open(); // Exercises embedded extraction/loading, not a developer-supplied library path.
         require(hook == OverwolfHook.open());
+        if (args[0].equals("silent")) {
+            try (var capture = hook.capture(Long.parseLong(args[1])); var worker = Executors.newSingleThreadExecutor()) {
+                var waiting = worker.submit(() -> capture.receive());
+                try { waiting.get(50, java.util.concurrent.TimeUnit.MILLISECONDS); throw new AssertionError("Did not block"); }
+                catch (java.util.concurrent.TimeoutException expected) { }
+                capture.close();
+                require(waiting.get(1, java.util.concurrent.TimeUnit.SECONDS) == EventReader.Status.CANCELLED);
+            }
+            System.out.println("PASS silent capture closes a blocked native receiver and controller");
+            return;
+        }
         if (args[0].equals("capture") || args[0].equals("hold") || args[0].equals("record")) {
             try (var capture = args[0].equals("record") ? hook.recordEvents(Path.of(args[2]), Long.parseLong(args[1])) :
                 hook.capture(Long.parseLong(args[1]))) {
@@ -21,10 +32,10 @@ public class JvmSmokeTest {
                 int events = 0;
                 while (events < 3) {
                     if (System.nanoTime() - started > 5_000_000_000L) throw new AssertionError("No owned-host events");
-                    if (capture.poll() instanceof EventReader.Event event) {
+                    if (capture.receive(java.time.Duration.ofSeconds(5)) instanceof EventReader.Event event) {
                         require(event.sourceChannel() == 900001);
                         ++events;
-                    } else Thread.sleep(2);
+                    } else throw new AssertionError("Missing owned-host event");
                 }
                 require(capture.diagnostics().contains("hook enabled; channel="));
                 if (args[0].equals("hold")) {
@@ -59,6 +70,15 @@ public class JvmSmokeTest {
             require(owh_result.status(owh_writer_create(arena, OWH_ABI_VERSION(), arena.allocateFrom(channel), 2,
                 (int)owh_probe_frame.sizeof(), output)) == OWH_OK());
             var writer = output.get(ADDRESS, 0);
+            // A blocked FFM receive must release its native pointers before
+            // another thread closes the arena. Cancellation wakes the kernel wait.
+            try (var blockedReader = hook.events(channel); var worker = Executors.newSingleThreadExecutor()) {
+                var waiting = worker.submit(() -> blockedReader.receive());
+                try { waiting.get(30, java.util.concurrent.TimeUnit.MILLISECONDS); throw new AssertionError("Did not block"); }
+                catch (java.util.concurrent.TimeoutException expected) { }
+                blockedReader.close();
+                require(waiting.get(1, java.util.concurrent.TimeUnit.SECONDS) == EventReader.Status.CANCELLED);
+            }
             try (var reader = hook.events(channel)) {
                 require(reader.poll() == EventReader.Status.NO_DATA);
                 var frame = owh_probe_frame.allocate(arena);
@@ -76,7 +96,7 @@ public class JvmSmokeTest {
                 require(owh_result.status(owh_writer_close(arena, writer)) == OWH_OK());
                 writer = MemorySegment.NULL;
                 require(reader.poll() == EventReader.Status.CLOSED);
-                try (var worker = Executors.newSingleThreadExecutor()) { worker.submit(reader::close).get(); }
+                try (var worker = Executors.newSingleThreadExecutor()) { worker.submit(() -> { reader.close(); return null; }).get(); }
                 require(event.bytes()[0] == (byte)0xa5); // Remains owned after close and native arena disposal.
             } finally { if (!writer.equals(MemorySegment.NULL)) owh_writer_close(arena, writer); }
         }

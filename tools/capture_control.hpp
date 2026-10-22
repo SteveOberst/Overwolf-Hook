@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <algorithm>
 
 namespace overwolf_hook::controller {
 inline uint64_t number(std::wstring_view value, const char* description) {
@@ -50,6 +51,35 @@ public:
             if (exists) return StopReason::Requested;
         }
         return deadline_ && GetTickCount64() >= deadline_ ? StopReason::Deadline : StopReason::None;
+    }
+    /** Sleep on kernel signals/directory changes until control changes. finished
+     * ends monitoring when the receiver has drained; no event-reception timer loop.
+     */
+    StopReason wait(HANDLE finished) const {
+        struct Changes {
+            HANDLE value = INVALID_HANDLE_VALUE;
+            ~Changes() { if (value != INVALID_HANDLE_VALUE) FindCloseChangeNotification(value); }
+        } changes;
+        if (!stop_file_.empty()) {
+            const auto parent = std::filesystem::absolute(stop_file_).parent_path();
+            changes.value = FindFirstChangeNotificationW(parent.c_str(), FALSE, FILE_NOTIFY_CHANGE_FILE_NAME);
+            if (changes.value == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot watch capture stop-file directory");
+        }
+        HANDLE handles[4]{finished}; DWORD count = 1;
+        if (target_) handles[count++] = target_;
+        if (request_) handles[count++] = request_;
+        if (changes.value != INVALID_HANDLE_VALUE) handles[count++] = changes.value;
+        for (;;) {
+            if (const auto current = reason(); current != StopReason::None) return current;
+            const auto now = GetTickCount64();
+            const DWORD timeout = deadline_ ? static_cast<DWORD>(std::min<ULONGLONG>(
+                deadline_ > now ? deadline_ - now : 0, INFINITE - 1)) : INFINITE;
+            const auto result = WaitForMultipleObjects(count, handles, FALSE, timeout);
+            if (result == WAIT_OBJECT_0) return StopReason::None;
+            if (result == WAIT_FAILED) throw std::runtime_error("Cannot wait for capture control");
+            if (changes.value != INVALID_HANDLE_VALUE && result == WAIT_OBJECT_0 + count - 1 &&
+                !FindNextChangeNotification(changes.value)) throw std::runtime_error("Cannot rearm stop-file notification");
+        }
     }
 private:
     ULONGLONG deadline_ = 0;

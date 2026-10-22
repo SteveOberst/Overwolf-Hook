@@ -1,5 +1,7 @@
 #include "../tools/capture_control.hpp"
 #include <iostream>
+#include <future>
+#include <chrono>
 
 namespace {
 void require(bool test) { if (!test) throw std::runtime_error("controller assertion failed"); }
@@ -13,9 +15,13 @@ int main() {
         require(request.value && target.value);
         CaptureControl indefinite(0, request.value, target.value);
         require(indefinite.reason() == StopReason::None);
+        Handle finished{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+        auto waiter = std::async(std::launch::async, [&] { return indefinite.wait(finished.value); });
+        require(waiter.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
         CaptureControl long_duration(86400, request.value, target.value);
         require(long_duration.reason() == StopReason::None); // No former 120-second cap.
         SetEvent(request.value);
+        require(waiter.get() == StopReason::Requested);
         require(indefinite.reason() == StopReason::Requested && long_duration.reason() == StopReason::Requested);
         ResetEvent(request.value); SetEvent(target.value);
         require(indefinite.reason() == StopReason::TargetExited);

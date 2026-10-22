@@ -77,7 +77,7 @@ struct Fixture {
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string(argv[1]) == "--owner") { Sleep(INFINITE); return 0; }
-        if (argc == 4 && std::string(argv[1]) == "--serve") {
+        if (argc == 4 && (std::string(argv[1]) == "--serve" || std::string(argv[1]) == "--serve-silent")) {
             // Owned remote-controller fixture only. Its target filename is set
             // by CMake; never launches or opens a real Overwolf/game process.
             Fixture f;
@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
             auto read = reinterpret_cast<uintptr_t(__fastcall*)(void*, profile::EventRange*, uintptr_t, uintptr_t)>(
                 profile::reader_address(f.consumer));
             { std::ofstream ready(argv[3]); ready << "owned fixture ready\n"; REQUIRE(ready.good()); }
+            if (std::string(argv[1]) == "--serve-silent") { Sleep(INFINITE); return 0; }
             for (;;) {
                 f.populate(); put(f.reader.data(), 0x18, uint64_t{0});
                 REQUIRE(read(f.reader.data(), &f.range, 2000, 0) == 1);

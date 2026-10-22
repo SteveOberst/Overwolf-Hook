@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" OWH_VERSION LIMIT_COUNT 1)
 set(OWH_RELEASE_VERSION "${OWH_VERSION}")
 string(REGEX MATCH "^[0-9]+[.][0-9]+[.][0-9]+" OWH_PROJECT_VERSION "${OWH_RELEASE_VERSION}")
@@ -14,7 +15,6 @@ include(CMakePackageConfigHelpers)
 option(OWH_HOOK_TESTS "Build MinHook experiments against the owned fixture" ON)
 option(OWH_FFM_TESTS "Exercise the C ABI from Java 25 FFM" OFF)
 option(OWH_JVM_BINDINGS "Build and test the bundled Java 25 API with jextract-generated bindings" OFF)
-set(OWH_JEXTRACT "" CACHE FILEPATH "Optional local jextract 25 executable instead of the pinned download")
 option(OWH_OVERWOLF_PROBE "Build the reviewed, explicit Overwolf capture experiment" ON)
 set(OWH_REVIEWED_CONSUMER "" CACHE FILEPATH "Optional exact consumer DLL for the owned-host ABI test")
 if(OWH_OVERWOLF_PROBE OR (BUILD_TESTING AND OWH_HOOK_TESTS))
@@ -58,37 +58,7 @@ if(OWH_OVERWOLF_PROBE)
 endif()
 
 if(OWH_JVM_BINDINGS)
-    if(NOT OWH_OVERWOLF_PROBE)
-        message(FATAL_ERROR "The bundled JVM capture API requires OWH_OVERWOLF_PROBE")
-    endif()
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    find_package(Java 25 REQUIRED COMPONENTS Runtime Development)
-    get_filename_component(_java_bin "${Java_JAVA_EXECUTABLE}" DIRECTORY)
-    get_filename_component(_java_home "${_java_bin}" DIRECTORY)
-    set(_jvm_output "${CMAKE_CURRENT_BINARY_DIR}/jvm/$<CONFIG>")
-    set(_jvm_jar "${_jvm_output}/overwolf-hook-${OWH_RELEASE_VERSION}-windows-x64.jar")
-    set(_jextract_args)
-    if(OWH_JEXTRACT)
-        list(APPEND _jextract_args --jextract "${OWH_JEXTRACT}")
-    endif()
-    file(GLOB_RECURSE _jvm_sources CONFIGURE_DEPENDS jvm/src/*.java examples/java/*.java include/overwolf_hook/*.h)
-    add_custom_command(OUTPUT "${_jvm_jar}"
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_jvm.py"
-            --native-dir "$<TARGET_FILE_DIR:owh_client>" --output "${_jvm_output}"
-            --java-home "${_java_home}" ${_jextract_args}
-        DEPENDS owh_client owh_capture owh_probe owh_info ${_jvm_sources}
-            tools/build_jvm.py jvm/toolchain.json version.txt
-        VERBATIM)
-    add_custom_target(owh_jvm ALL DEPENDS "${_jvm_jar}")
-    install(FILES "${_jvm_jar}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
-    if(BUILD_TESTING)
-        add_test(NAME jvm.artifact COMMAND "${Java_JAVA_EXECUTABLE}" --enable-native-access=ALL-UNNAMED
-            --class-path "${_jvm_jar};${_jvm_output}/test-classes" JvmSmokeTest transport "$<TARGET_FILE:owh_capture>")
-        set_tests_properties(jvm.artifact PROPERTIES TIMEOUT 30)
-        add_test(NAME jvm.cache COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jvm_cache_test.py
-            "${Java_JAVA_EXECUTABLE}" "${_jvm_jar};${_jvm_output}/test-classes" "$<TARGET_FILE:owh_capture>")
-        set_tests_properties(jvm.cache PROPERTIES TIMEOUT 30)
-    endif()
+    add_subdirectory(jvm/java)
 endif()
 
 foreach(target IN ITEMS owh_transport owh_capture owh_client owh_info owh_probe)
@@ -126,7 +96,7 @@ if(BUILD_TESTING)
     target_link_libraries(owh_state_tests PRIVATE owh_client)
     if(OWH_JVM_BINDINGS)
         add_test(NAME jvm.state COMMAND owh_state_tests jvm-library "${Java_JAVA_EXECUTABLE}"
-            "${_jvm_jar};${_jvm_output}/test-classes")
+            "$<TARGET_GENEX_EVAL:owh_java,$<TARGET_PROPERTY:owh_java,OWH_TEST_CLASSPATH>>")
         set_tests_properties(jvm.state PROPERTIES TIMEOUT 20)
     endif()
     foreach(case IN ITEMS roundtrip bounds availability lifecycle contention)
@@ -137,7 +107,7 @@ if(BUILD_TESTING)
     target_compile_features(owh_transport_tests PRIVATE cxx_std_20)
     target_link_libraries(owh_transport_tests PRIVATE owh_capture owh_client)
     target_compile_definitions(owh_transport_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    foreach(case IN ITEMS roundtrip readers boundary overflow buffer invalid lifecycle process crash corrupt)
+    foreach(case IN ITEMS roundtrip readers notifications registrations boundary overflow buffer invalid lifecycle process crash wait_process wait_crash corrupt)
         add_test(NAME transport.${case} COMMAND owh_transport_tests ${case})
         set_tests_properties(transport.${case} PROPERTIES TIMEOUT 15)
     endforeach()
@@ -201,7 +171,7 @@ if(BUILD_TESTING)
             add_test(NAME reviewed_jvm_capture COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/jvm_capture_test.py $<TARGET_FILE:owh_controller_host>
                 "${OWH_REVIEWED_CONSUMER}" "${Java_JAVA_EXECUTABLE}"
-                "${_jvm_jar};${_jvm_output}/test-classes")
+                "$<TARGET_GENEX_EVAL:owh_java,$<TARGET_PROPERTY:owh_java,OWH_TEST_CLASSPATH>>")
             set_tests_properties(reviewed_jvm_capture PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
         endif()
     endif()
@@ -235,7 +205,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/OverwolfHookConfigVersion.cmake" "set(PA
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/OverwolfHookConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/OverwolfHookConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OverwolfHook)
-install(FILES README.md LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES README.md CONTRIBUTING.md LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 set(CPACK_GENERATOR ZIP)
 set(CPACK_PACKAGE_FILE_NAME "overwolf-hook-${OWH_RELEASE_VERSION}-windows-x64")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

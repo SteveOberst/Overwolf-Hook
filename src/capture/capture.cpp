@@ -34,6 +34,7 @@ extern "C" OWH_CAPTURE owh_result __cdecl owh_writer_publish(owh_writer* writer,
         std::memcpy(slot, &entry, sizeof(entry));
         if (size) std::memcpy(slot + sizeof(entry), bytes, size);
         h.published = sequence;
+        channel.notify_readers();
         return overwolf_hook::ok;
     });
 }
@@ -44,6 +45,7 @@ extern "C" OWH_CAPTURE owh_result __cdecl owh_writer_close(owh_writer* writer) {
         auto& channel = *writer->channel;
         overwolf_hook::Lock lock(channel.mutex.get(), 100);
         channel.header().closed = 1;
+        channel.notify_readers();
         return overwolf_hook::ok;
     });
     if (result.status == OWH_OK) delete writer;

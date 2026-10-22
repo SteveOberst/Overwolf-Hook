@@ -1,5 +1,7 @@
 #include <overwolf_hook/probe.h>
 #include "capture_control.hpp"
+#include <thread>
+#include <functional>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -102,6 +104,16 @@ struct Session {
         }
     }
 };
+struct StopMonitor {
+    Handle finished{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    std::thread worker;
+    explicit StopMonitor(std::function<void(HANDLE)> operation) {
+        if (!finished.value) error("Cannot create controller completion signal");
+        worker = std::thread([this, operation = std::move(operation)] { operation(finished.value); });
+    }
+    void join() { SetEvent(finished.value); if (worker.joinable()) worker.join(); }
+    ~StopMonitor() { join(); }
+};
 struct ConsoleControl {
     Handle stop{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     Handle done{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
@@ -128,8 +140,8 @@ int wmain(int argc, wchar_t** argv) {
         wchar_t forever[] = L"0", no_recording[] = L"-";
         std::vector<wchar_t*> streaming;
         if (argc >= 2 && std::wstring_view(argv[1]) == L"stream") {
-            if (argc != 4 && argc != 5 && argc != 7) {
-                std::cerr << "Usage: owh_probe stream <Overwolf PID> <capture DLL absolute path> [all|source-channel] [--stop-file <path>]\n";
+            if (argc != 4 && argc != 5 && argc != 7 && argc != 9) {
+                std::cerr << "Usage: owh_probe stream <Overwolf PID> <capture DLL absolute path> [all|source-channel] [--stop-file <path>] [--ready-file <path>]\n";
                 return 2;
             }
             streaming = {argv[0], argv[2], argv[3], forever, no_recording};
@@ -138,8 +150,8 @@ int wmain(int argc, wchar_t** argv) {
             argv = streaming.data();
         }
         // No generic injection interface: explicitly selected Overwolf host only.
-        if (argc != 5 && argc != 6 && argc != 8) {
-            std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds|0=until-stop> <new capture file> [all|source-channel] [--stop-file <path>]\n";
+        if (argc != 5 && argc != 6 && argc != 8 && argc != 10) {
+            std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds|0=until-stop> <new capture file> [all|source-channel] [--stop-file <path>] [--ready-file <path>]\n";
             return 2;
         }
         using namespace overwolf_hook::controller;
@@ -150,11 +162,15 @@ int wmain(int argc, wchar_t** argv) {
                 throw std::runtime_error("Source channel outside 1..4294967295; use 'all' for every event channel");
             source_channel = static_cast<uint32_t>(value);
         }
-        std::filesystem::path stop_file;
-        if (argc == 8) {
-            if (std::wstring_view(argv[6]) != L"--stop-file") throw std::runtime_error("Expected --stop-file <path>");
-            stop_file = std::filesystem::absolute(argv[7]);
-            if (std::filesystem::exists(stop_file)) throw std::runtime_error("Stop file must not already exist");
+        std::filesystem::path stop_file, ready_file;
+        for (int i = 6; i < argc; i += 2) {
+            const std::wstring_view option = argv[i];
+            auto& path = option == L"--stop-file" ? stop_file : ready_file;
+            if (option != L"--stop-file" && option != L"--ready-file")
+                throw std::runtime_error("Expected --stop-file or --ready-file <path>");
+            if (!path.empty()) throw std::runtime_error("Duplicate controller option");
+            path = std::filesystem::absolute(argv[i + 1]);
+            if (std::filesystem::exists(path)) throw std::runtime_error("Control file must not already exist");
         }
         const auto selected_pid = number(argv[1], "PID must be a nonzero uint32");
         if (!selected_pid || selected_pid > UINT32_MAX) throw std::runtime_error("PID must be a nonzero uint32");
@@ -243,31 +259,33 @@ int wmain(int argc, wchar_t** argv) {
             << "; host_pid=" << pid << "; host_started=" << created(process.value)
             << "; started_qpc=" << qpc.QuadPart << "; qpc_frequency=" << frequency.QuadPart
             << "; started_filetime_utc=" << filetime << '\n' << std::flush;
+        // An explicit readiness handshake. Log-file modification notifications
+        // alone are not reliable while the controller still holds that file open.
+        if (!ready_file.empty()) {
+            Handle ready{CreateFileW(ready_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
+            if (ready.value == INVALID_HANDLE_VALUE) error("Cannot create controller readiness file");
+        }
         CaptureControl capture_control(seconds, console.stop.value, process.value, stop_file);
         uint64_t received = 0, lost = 0;
         bool stopped = false;
         bool target_exited = false;
-        ULONGLONG drain_deadline = 0;
         DWORD stop_result = OWH_OK;
-        for (;;) {
-            const auto reason = capture_control.reason();
-            if (!stopped && reason != StopReason::None) {
+        std::exception_ptr stop_failure;
+        StopMonitor monitor([&](HANDLE finished) {
+            try {
+                const auto reason = capture_control.wait(finished);
+                if (reason == StopReason::None) return;
                 target_exited = reason == StopReason::TargetExited;
-                stop_result = target_exited ? OWH_CLOSED : call(process.value, session.stop);
-                session.started = !target_exited && stop_result != OWH_OK;
-                if (target_exited) stop_result = OWH_OK;
-                if (stop_result != OWH_OK)
-                    throw std::runtime_error("Capture did not stop: " + std::to_string(stop_result));
+                stop_result = target_exited ? OWH_OK : call(process.value, session.stop);
+                if (stop_result != OWH_OK) throw std::runtime_error("Capture did not stop: " + std::to_string(stop_result));
                 stopped = true;
-                drain_deadline = GetTickCount64() + 10000;
-            }
+            } catch (...) { stop_failure = std::current_exception(); owh_reader_cancel(reader.value); }
+        });
+        for (;;) {
             owh_probe_frame frame{}; owh_record record{};
-            const auto result = owh_reader_next(reader.value, &frame, sizeof(frame), &record);
-            if (result.status == OWH_NO_DATA || result.status == OWH_BUSY) {
-                if (stopped && GetTickCount64() >= drain_deadline) throw std::runtime_error("Capture drain timed out");
-                Sleep(1); continue;
-            }
-            if (result.status == OWH_CLOSED) break;
+            const auto result = owh_reader_receive(reader.value, &frame, sizeof(frame), OWH_WAIT_INFINITE, &record);
+            if (result.status == OWH_CLOSED || result.status == OWH_CANCELLED) break;
             if (result.status != OWH_OK || record.size != sizeof(frame))
                 throw std::runtime_error("Invalid capture read: " + std::to_string(result.status));
             if (record_output) {
@@ -282,6 +300,10 @@ int wmain(int argc, wchar_t** argv) {
                     << ": " << event << '\n' << std::flush;
             }
         }
+        monitor.join();
+        if (capture_control.reason() == StopReason::TargetExited) target_exited = true;
+        if (stop_failure && !target_exited) std::rethrow_exception(stop_failure);
+        if (stopped) session.started = false;
         if (record_output && !FlushFileBuffers(output.value)) error("Cannot flush capture file");
         // The host may exit after CLOSED is read but before diagnostics are queried.
         if (capture_control.reason() == StopReason::TargetExited) target_exited = true;

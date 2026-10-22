@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.lang.foreign.*;
 import java.nio.file.*;
 import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 import static java.lang.foreign.ValueLayout.*;
 
 /** Explicit capture lifetime. Closing requests stop/drain; a Windows job kills only our controller if the JVM dies.
@@ -17,7 +18,8 @@ public final class Capture implements AutoCloseable {
     private final Path stop;
     private final Path log;
     private EventReader reader;
-    private boolean closed;
+    private String channel;
+    private volatile boolean closed;
 
     private Capture(ControllerJob owner, Process controller, Path directory) {
         this.owner = owner;
@@ -47,7 +49,8 @@ public final class Capture implements AutoCloseable {
         var directory = Files.createTempDirectory("overwolf-hook-session-");
         ControllerJob owner = null;
         Capture session = null;
-        try {
+        try (var updates = FileSystems.getDefault().newWatchService()) {
+            directory.register(updates, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
             owner = new ControllerJob();
             var arguments = new java.util.ArrayList<String>();
             arguments.add(binaries.resolve("owh_probe.exe").toString());
@@ -58,7 +61,8 @@ public final class Capture implements AutoCloseable {
                 arguments.add("0");
                 arguments.add(recording.toAbsolutePath().toString());
             }
-            arguments.addAll(java.util.List.of("all", "--stop-file", directory.resolve("STOP").toString()));
+            arguments.addAll(java.util.List.of("all", "--stop-file", directory.resolve("STOP").toString(),
+                "--ready-file", directory.resolve("READY").toString()));
             var builder = new ProcessBuilder(arguments)
                 .redirectErrorStream(true).redirectOutput(directory.resolve("controller.log").toFile());
             session = new Capture(owner, owner.start(builder), directory);
@@ -66,15 +70,21 @@ public final class Capture implements AutoCloseable {
             while (true) {
                 String diagnostics = session.diagnostics();
                 for (String line : diagnostics.lines().toList()) {
-                    if (line.startsWith("hook enabled; channel=")) {
+                    if (Files.exists(directory.resolve("READY")) && line.startsWith("hook enabled; channel=")) {
                         String channel = line.substring("hook enabled; channel=".length()).split(";", 2)[0];
+                        session.channel = channel;
                         session.reader = new EventReader(channel, false);
                         return session;
                     }
                 }
                 if (!session.controller.isAlive()) throw new IOException("Overwolf capture did not start: " + diagnostics);
                 if (System.nanoTime() - started > TimeUnit.SECONDS.toNanos(35)) throw new IOException("Overwolf capture startup timed out: " + diagnostics);
-                Thread.sleep(10);
+                long remaining = TimeUnit.SECONDS.toNanos(35) - (System.nanoTime() - started);
+                var change = updates.poll(Math.max(0, remaining), TimeUnit.NANOSECONDS);
+                if (change != null) {
+                    change.pollEvents();
+                    if (!change.reset()) throw new IOException("Capture startup directory became unavailable");
+                }
             }
         } catch (Throwable failure) {
             if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -82,6 +92,7 @@ public final class Capture implements AutoCloseable {
                 if (session != null) session.close();
                 else {
                     if (owner != null) owner.close();
+                    Files.deleteIfExists(directory.resolve("READY"));
                     Files.deleteIfExists(directory.resolve("controller.log"));
                     Files.deleteIfExists(directory);
                 }
@@ -92,10 +103,24 @@ public final class Capture implements AutoCloseable {
         }
     }
 
-    public synchronized EventReader.Result poll() throws NativeFailure {
+    /** Open an independent retained cursor on this capture's bridge. The caller
+     * owns the reader. Closing it does not stop this capture or other readers;
+     * ending the capture closes the producer and readers may drain retained data.
+     */
+    public synchronized EventReader openReader() throws NativeFailure {
+        if (closed) throw new IllegalStateException("Capture is closed");
+        return new EventReader(channel, false);
+    }
+
+    public EventReader.Result poll() throws NativeFailure {
         if (closed) throw new IllegalStateException("Capture is closed");
         return reader.poll();
     }
+    /** Kernel-signalled reception; closing this session wakes a blocked receiver. */
+    public EventReader.Result receive() throws NativeFailure { return reader.receive(); }
+    public EventReader.Result receive(Duration timeout) throws NativeFailure { return reader.receive(timeout); }
+    /** Cancel pending/future receives. Close the session to stop its controller as well. */
+    public void cancelReceive() throws NativeFailure { if (reader != null) reader.cancel(); }
 
     /** Startup/profile diagnostics and QPC/UTC anchor. Available until close; recordings are never deleted. */
     public String diagnostics() throws IOException { return Files.exists(log) ? Files.readString(log) : ""; }
@@ -107,6 +132,7 @@ public final class Capture implements AutoCloseable {
         IOException completion = null;
         try {
             try {
+                cancelReceive();
                 Files.createFile(stop);
                 if (!controller.waitFor(10, TimeUnit.SECONDS)) {
                     completion = new IOException("Capture did not drain before its shutdown deadline: " + diagnostics());
@@ -128,6 +154,7 @@ public final class Capture implements AutoCloseable {
         } finally {
             try {
                 Files.deleteIfExists(stop);
+                Files.deleteIfExists(directory.resolve("READY"));
                 Files.deleteIfExists(log);
                 Files.deleteIfExists(directory);
             } finally { if (interrupted) Thread.currentThread().interrupt(); }

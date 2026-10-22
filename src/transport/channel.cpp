@@ -1,10 +1,12 @@
 #include "channel.hpp"
 #include <cstring>
 #include <string>
+#include <cstdio>
 
 namespace overwolf_hook {
 namespace {
-constexpr uint32_t magic = 0x3148454f; // Original ABI-1 bridge magic; retained across the API rename.
+constexpr uint32_t magic = 0x3148454f;
+constexpr uint32_t wire_version = 2; // Notification registrations; independent of the public C ABI.
 constexpr size_t maximum_mapping = 16 * 1024 * 1024;
 
 std::string object_name(const char* channel, const char* suffix) {
@@ -49,12 +51,22 @@ Lock::Lock(HANDLE mutex, DWORD timeout) : mutex_(mutex) {
     if (result == WAIT_TIMEOUT) fail(OWH_BUSY);
     if (!owned_) fail(OWH_SYSTEM_ERROR, GetLastError());
 }
+Lock::Lock(HANDLE mutex, DWORD timeout, HANDLE cancel) : mutex_(mutex) {
+    HANDLE handles[]{cancel, mutex};
+    const DWORD result = WaitForMultipleObjects(2, handles, FALSE, timeout);
+    owned_ = result == WAIT_OBJECT_0 + 1 || result == WAIT_ABANDONED_0 + 1;
+    abandoned_ = result == WAIT_ABANDONED_0 + 1;
+    if (result == WAIT_OBJECT_0) fail(OWH_CANCELLED);
+    if (result == WAIT_TIMEOUT) fail(OWH_TIMEOUT);
+    if (!owned_) fail(OWH_SYSTEM_ERROR, GetLastError());
+}
 
 std::unique_ptr<Channel> Channel::create(const char* name, uint32_t slots, uint32_t bytes) {
     const size_t size = mapping_size(slots, bytes);
     auto channel = std::make_unique<Channel>();
     const auto mutex_name = object_name(name, ".mutex");
     const auto data_name = object_name(name, ".data");
+    channel->name = name;
     channel->mutex = Handle(CreateMutexA(nullptr, FALSE, mutex_name.c_str()));
     if (!channel->mutex.get()) fail(OWH_SYSTEM_ERROR, GetLastError());
     Lock lock(channel->mutex.get(), 100);
@@ -65,7 +77,7 @@ std::unique_ptr<Channel> Channel::create(const char* name, uint32_t slots, uint3
     if (error == ERROR_ALREADY_EXISTS) fail(OWH_ALREADY_EXISTS);
     map(*channel, FILE_MAP_READ | FILE_MAP_WRITE);
     std::memset(channel->view.address, 0, size);
-    channel->header() = Header{magic, OWH_ABI_VERSION, slots, bytes, 0,
+    channel->header() = Header{magic, wire_version, slots, bytes, 0,
         started(GetCurrentProcess()), GetCurrentProcessId(), 0};
     return channel;
 }
@@ -74,14 +86,17 @@ std::unique_ptr<Channel> Channel::open(const char* name) {
     auto channel = std::make_unique<Channel>();
     const auto data_name = object_name(name, ".data");
     const auto mutex_name = object_name(name, ".mutex");
-    channel->mapping = Handle(OpenFileMappingA(FILE_MAP_READ, FALSE, data_name.c_str()));
+    channel->name = name;
+    // Readers write only their notification registration; publication and cursor
+    // ownership stay separate. This shared channel is not a hostile-peer boundary.
+    channel->mapping = Handle(OpenFileMappingA(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, data_name.c_str()));
     if (!channel->mapping.get()) {
         const DWORD error = GetLastError();
         fail(error == ERROR_FILE_NOT_FOUND ? OWH_NOT_FOUND : OWH_SYSTEM_ERROR, error);
     }
     channel->mutex = Handle(OpenMutexA(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE, mutex_name.c_str()));
     if (!channel->mutex.get()) fail(OWH_SYSTEM_ERROR, GetLastError());
-    map(*channel, FILE_MAP_READ);
+    map(*channel, FILE_MAP_READ | FILE_MAP_WRITE);
     Lock lock(channel->mutex.get(), 100);
     if (lock.abandoned()) fail(OWH_CORRUPT);
     channel->validate();
@@ -100,7 +115,7 @@ std::unique_ptr<Channel> Channel::open(const char* name) {
 void Channel::validate() const {
     if (view.size < sizeof(Header)) fail(OWH_CORRUPT);
     const auto& h = header();
-    if (h.magic != magic || h.version != OWH_ABI_VERSION) fail(OWH_INCOMPATIBLE);
+    if (h.magic != magic || h.version != wire_version) fail(OWH_INCOMPATIBLE);
     size_t expected;
     try { expected = mapping_size(h.slots, h.record_bytes); }
     catch (const Failure&) { fail(OWH_CORRUPT); }
@@ -117,5 +132,41 @@ bool Channel::producer_exited() const {
     const DWORD result = WaitForSingleObject(producer.get(), 0);
     if (result == WAIT_FAILED) fail(OWH_SYSTEM_ERROR, GetLastError());
     return result == WAIT_OBJECT_0;
+}
+
+Handle Channel::reader_event(uint64_t generation, bool create) const {
+    char event_name[200];
+    std::snprintf(event_name, sizeof(event_name), "Local\\overwolf-hook.%s.reader.%llu", name.c_str(),
+        static_cast<unsigned long long>(generation));
+    Handle event(create ? CreateEventA(nullptr, TRUE, FALSE, event_name) :
+        OpenEventA(EVENT_MODIFY_STATE, FALSE, event_name));
+    if (!event.get()) fail(OWH_SYSTEM_ERROR, GetLastError());
+    if (create && GetLastError() == ERROR_ALREADY_EXISTS) fail(OWH_ALREADY_EXISTS);
+    return event;
+}
+
+void Channel::notify_readers() {
+    owh_result failure = ok;
+    for (size_t i = 0; i < maximum_readers; ++i) {
+        const auto generation = header().readers[i].generation;
+        auto& notification = notifications[i];
+        if (generation != notification.generation) {
+            notification.event = Handle{};
+            notification.generation = generation;
+        }
+        if (!generation) continue;
+        if (!notification.event.get()) {
+            try { notification.event = reader_event(generation, false); }
+            catch (const Failure& error) {
+                // Reader death before the writer's first notification leaves no
+                // event object. Reclaim that abandoned registration.
+                if (error.result.native_error == ERROR_FILE_NOT_FOUND) header().readers[i] = {};
+                else failure = error.result;
+                continue;
+            }
+        }
+        if (!SetEvent(notification.event.get())) failure = {OWH_SYSTEM_ERROR, GetLastError()};
+    }
+    if (failure.status != OWH_OK) throw Failure{failure};
 }
 }

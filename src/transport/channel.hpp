@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <cstddef>
 #include <memory>
+#include <array>
+#include <string>
 #include <utility>
 
 namespace overwolf_hook {
@@ -41,6 +43,13 @@ public:
 
 // Plain fixed-width wire values. All reads/writes are under the named mutex;
 // no STL objects, addresses or C++ atomics cross a process boundary.
+inline constexpr size_t maximum_readers = 64;
+struct ReaderRegistration {
+    uint64_t generation;
+    uint64_t process_started;
+    uint32_t process_id;
+    uint32_t reserved;
+};
 struct Header {
     uint32_t magic;
     uint32_t version;
@@ -50,19 +59,26 @@ struct Header {
     uint64_t process_started;
     uint32_t process_id;
     uint32_t closed;
+    uint64_t reader_generation;
+    ReaderRegistration readers[maximum_readers];
 };
 struct Slot { uint64_t sequence; uint32_t size; uint32_t reserved; };
-static_assert(sizeof(Header) == 40 && sizeof(Slot) == 16);
+static_assert(sizeof(Header) == 1584 && sizeof(Slot) == 16);
 
 struct Channel {
     Handle mutex;
     Handle mapping;
     Handle producer;
     View view;
+    std::string name;
+    struct Notification { uint64_t generation = 0; Handle event; };
+    std::array<Notification, maximum_readers> notifications;
     Header& header() const { return *static_cast<Header*>(view.address); }
     std::byte* slot(uint64_t sequence) const;
     void validate() const;
     bool producer_exited() const;
+    Handle reader_event(uint64_t generation, bool create) const;
+    void notify_readers(); // Called under the publication mutex, no wait for consumers.
     static std::unique_ptr<Channel> create(const char*, uint32_t slots, uint32_t bytes);
     static std::unique_ptr<Channel> open(const char*);
 };
@@ -70,6 +86,7 @@ struct Channel {
 class Lock {
 public:
     explicit Lock(HANDLE mutex, DWORD timeout);
+    Lock(HANDLE mutex, DWORD timeout, HANDLE cancel);
     ~Lock() { if (owned_) ReleaseMutex(mutex_); }
     bool abandoned() const { return abandoned_; }
 private:

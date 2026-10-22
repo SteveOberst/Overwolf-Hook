@@ -1,0 +1,10 @@
+// Test the consumer's real dependency coordinates before the SDK is published.
+settingsEvaluated { settings ->
+    def path = System.getProperty('overwolfHookTestRepository')
+    if (!path) throw new GradleException('Set -DoverwolfHookTestRepository to the source-build Ivy repository')
+    settings.dependencyResolutionManagement.repositories.withType(org.gradle.api.artifacts.repositories.IvyArtifactRepository).configureEach { repository ->
+        if (repository.url.toString() == 'https://github.com/SteveOberst/Overwolf-Hook/releases/download') {
+            repository.url = new File(path).toURI()
+        }
+    }
+}

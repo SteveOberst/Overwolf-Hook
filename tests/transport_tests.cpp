@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <future>
+#include <chrono>
+#include <thread>
 
 #define REQUIRE(test) do { if (!(test)) throw std::runtime_error(#test); } while (false)
 
@@ -68,6 +71,71 @@ void readers() {
     publish(writer, 42); publish(writer, 43);
     REQUIRE(read(first, 42).sequence == 1); REQUIRE(read(first, 43).sequence == 2);
     REQUIRE(read(second, 42).sequence == 1); REQUIRE(read(second, 43).sequence == 2);
+}
+void notifications() {
+    using namespace std::chrono_literals;
+    const auto name = channel_name(); Writer writer; Reader fast, slow;
+    create(writer, name); open(fast, name); open(slow, name);
+    const auto receive = [](Reader& reader) {
+        owh_record record{}; uint32_t value = 0;
+        const auto status = owh_reader_receive(reader.value, &value, sizeof(value), 2000, &record).status;
+        REQUIRE(status == OWH_OK); return value;
+    };
+    // Publication deliberately does not wait for concurrent readers. Retry BUSY
+    // only in this test harness so contention is not mistaken for a lost signal.
+    const auto send = [&](uint32_t value) {
+        const auto until = std::chrono::steady_clock::now() + 1s;
+        for (;;) {
+            const auto result = owh_writer_publish(writer.value, &value, sizeof(value));
+            if (result.status == OWH_OK) return;
+            REQUIRE(result.status == OWH_BUSY && std::chrono::steady_clock::now() < until);
+            std::this_thread::yield();
+        }
+    };
+    auto first = std::async(std::launch::async, [&] { return receive(fast); });
+    auto second = std::async(std::launch::async, [&] { return receive(slow); });
+    REQUIRE(first.wait_for(30ms) == std::future_status::timeout);
+    REQUIRE(second.wait_for(30ms) == std::future_status::timeout);
+    send(42);
+    REQUIRE(first.get() == 42 && second.get() == 42);
+    // A fast reader drains and rearms while a peer has not even started waiting.
+    // The peer's notification and independent cursor must remain intact.
+    for (uint32_t i = 1; i <= 100; ++i) {
+        send(i);
+        REQUIRE(receive(fast) == i);
+        auto pending = std::async(std::launch::async, [&] { return receive(fast); });
+        REQUIRE(receive(slow) == i);
+        send(i + 1000);
+        REQUIRE(pending.get() == i + 1000 && receive(slow) == i + 1000);
+    }
+    owh_record record{}; uint32_t value;
+    REQUIRE(owh_reader_receive(fast.value, &value, sizeof(value), 20, &record).status == OWH_TIMEOUT);
+    auto blocked = std::async(std::launch::async, [&] {
+        return owh_reader_receive(fast.value, &value, sizeof(value), OWH_WAIT_INFINITE, &record).status;
+    });
+    REQUIRE(blocked.wait_for(30ms) == std::future_status::timeout);
+    REQUIRE(owh_reader_cancel(fast.value).status == OWH_OK);
+    REQUIRE(blocked.wait_for(1s) == std::future_status::ready && blocked.get() == OWH_CANCELLED);
+    REQUIRE(next_status(fast) == OWH_CANCELLED);
+    auto closing = std::async(std::launch::async, [&] {
+        return owh_reader_receive(slow.value, &value, sizeof(value), OWH_WAIT_INFINITE, &record).status;
+    });
+    REQUIRE(closing.wait_for(30ms) == std::future_status::timeout);
+    REQUIRE(owh_writer_close(writer.value).status == OWH_OK); writer.value = nullptr;
+    REQUIRE(closing.wait_for(1s) == std::future_status::ready && closing.get() == OWH_CLOSED);
+}
+void registrations() {
+    const auto name = channel_name(); Writer writer;
+    create(writer, name);
+    // Repeated short-lived readers must release their slots, not exhaust the registry.
+    for (int i = 0; i < 200; ++i) { Reader reader; open(reader, name); }
+    std::array<Reader, 64> readers;
+    for (auto& reader : readers) open(reader, name);
+    Reader excess;
+    REQUIRE(owh_reader_open(OWH_ABI_VERSION, name.c_str(), OWH_RETAINED, &excess.value).status == OWH_RESOURCE_EXHAUSTED);
+    REQUIRE(!excess.value);
+    publish(writer, 7);
+    for (auto& reader : readers) REQUIRE(read(reader, 7).sequence == 1);
 }
 void boundary() {
     const auto name = channel_name(); Writer writer; Reader retained, fresh;
@@ -150,7 +218,7 @@ int producer(const std::string& name) {
     return 0;
 }
 
-void process_test(bool crash) {
+void process_test(bool crash, bool blocking = false) {
     const auto name = channel_name();
     Handle ready{CreateEventW(nullptr, TRUE, FALSE, event_name(name, L".ready").c_str())};
     Handle stop{CreateEventW(nullptr, TRUE, FALSE, event_name(name, L".stop").c_str())};
@@ -174,12 +242,28 @@ void process_test(bool crash) {
     REQUIRE(WaitForSingleObject(ready.value, 5000) == WAIT_OBJECT_0);
     Reader first, second; open(first, name); open(second, name);
     read(first, 101); read(second, 101);
+    std::future<owh_status> waiter;
+    if (blocking) {
+        read(first, 202); read(second, 202);
+        waiter = std::async(std::launch::async, [&] {
+            owh_record record{}; uint32_t value;
+            return owh_reader_receive(first.value, &value, sizeof(value), OWH_WAIT_INFINITE, &record).status;
+        });
+        REQUIRE(waiter.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
+    }
     if (crash) REQUIRE(TerminateProcess(child.value, 23));
     else REQUIRE(SetEvent(stop.value));
     REQUIRE(WaitForSingleObject(child.value, 5000) == WAIT_OBJECT_0);
     DWORD code = 0; REQUIRE(GetExitCodeProcess(child.value, &code));
     REQUIRE(code == (crash ? 23u : 0u));
-    read(first, 202); read(second, 202);
+    if (blocking) {
+        REQUIRE(waiter.wait_for(std::chrono::seconds(1)) == std::future_status::ready && waiter.get() == OWH_CLOSED);
+    } else {
+        uint32_t value; owh_record record{};
+        REQUIRE(owh_reader_receive(first.value, &value, sizeof(value), 1000, &record).status == OWH_OK && value == 202);
+        REQUIRE(owh_reader_receive(second.value, &value, sizeof(value), 1000, &record).status == OWH_OK && value == 202);
+        REQUIRE(owh_reader_receive(first.value, &value, sizeof(value), 1000, &record).status == OWH_CLOSED);
+    }
     REQUIRE(next_status(first) == OWH_CLOSED && next_status(second) == OWH_CLOSED);
 }
 }
@@ -191,6 +275,8 @@ int main(int argc, char** argv) {
         if (test == "--producer") { REQUIRE(argc == 3); return producer(argv[2]); }
         if (test == "roundtrip") roundtrip();
         else if (test == "readers") readers();
+        else if (test == "notifications") notifications();
+        else if (test == "registrations") registrations();
         else if (test == "boundary") boundary();
         else if (test == "overflow") overflow();
         else if (test == "buffer") buffer();
@@ -199,6 +285,8 @@ int main(int argc, char** argv) {
         else if (test == "corrupt") corrupt();
         else if (test == "process") process_test(false);
         else if (test == "crash") process_test(true);
+        else if (test == "wait_process") process_test(false, true);
+        else if (test == "wait_crash") process_test(true, true);
         else throw std::runtime_error("Unknown test");
         std::cout << "PASS " << test << '\n'; return 0;
     } catch (const std::exception& error) {

@@ -38,12 +38,19 @@ jobs:
       - name: Compile the Kotlin examples against the actual JVM artifact
         shell: pwsh
         run: |
-          $jar = (Get-ChildItem "build/ci/jvm/${{ matrix.configuration }}" -Filter '*.jar').FullName
-          ./examples/kotlin/gradlew.bat -p examples/kotlin installDist "-PoverwolfHookJar=$jar" --no-daemon
+          $version = (Get-Content version.txt).Trim()
+          $jar = "$PWD/build/ci/jvm/java/${{ matrix.configuration }}/overwolf-hook-$version-windows-x64.jar"
+          $repository = "$PWD/build/kotlin-test-repository"
+          $release = New-Item -ItemType Directory -Force -Path "$repository/v$version"
+          Copy-Item -LiteralPath $jar -Destination $release.FullName
+          ./examples/kotlin/gradlew.bat -p jvm/kotlin check publish "-I$PWD/tests/kotlin_source_build.init.gradle" "-DoverwolfHookTestRepository=$repository" "-PowhCaptureDll=$PWD/build/ci/${{ matrix.configuration }}/owh_capture.dll" --no-daemon
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem "jvm/kotlin/build/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination $release.FullName
+          ./examples/kotlin/gradlew.bat -p examples/kotlin installDist "-PoverwolfHookVersion=$version" "-I$PWD/tests/kotlin_source_build.init.gradle" "-DoverwolfHookTestRepository=$repository" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/examples/kotlin/build/install/overwolf-hook-kotlin-example/lib/*" ReadStateKt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$PWD/build/ci/jvm/${{ matrix.configuration }}/test-classes" ReadState
+          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$PWD/build/ci/jvm/java/${{ matrix.configuration }}/test-classes" ReadState
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile the installed C example
         shell: pwsh
@@ -61,8 +68,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $zip = Get-ChildItem out/packages -Filter '*.zip'
           if (@($zip).Count -ne 1) { throw 'Expected exactly one package' }
-          Copy-Item build/ci/jvm/Release/*.jar out/packages/
-          $lines = Get-ChildItem out/packages -File | Where-Object { $_.Extension -in '.zip', '.jar' } | Sort-Object Name | ForEach-Object {
+          Copy-Item build/ci/jvm/java/Release/*.jar out/packages/
+          $version = (Get-Content version.txt).Trim()
+          Get-ChildItem "jvm/kotlin/build/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination out/packages/
+          $lines = Get-ChildItem out/packages -File | Where-Object { $_.Extension -in '.zip', '.jar', '.xml' } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           }
@@ -74,11 +83,14 @@ jobs:
           path: |
             out/packages/*.zip
             out/packages/*.jar
+            out/packages/*.ivy.xml
             out/packages/SHA256SUMS
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: tests-${{ matrix.configuration }}
-          path: build/ci/test-results.xml
+          path: |
+            build/ci/test-results.xml
+            jvm/kotlin/build/test-results/test/*.xml
           if-no-files-found: warn

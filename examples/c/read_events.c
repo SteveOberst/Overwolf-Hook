@@ -23,9 +23,8 @@ int main(int argc, char** argv) {
     for (;;) {
         owh_probe_frame frame = {0};
         owh_record record = {0};
-        result = owh_reader_next(reader, &frame, sizeof(frame), &record);
+        result = owh_reader_receive(reader, &frame, sizeof(frame), OWH_WAIT_INFINITE, &record);
         if (result.status == OWH_CLOSED) break;
-        if (result.status == OWH_NO_DATA || result.status == OWH_BUSY) { Sleep(1); continue; }
         if (result.status != OWH_OK || record.size != sizeof(frame) || frame.raw_size != sizeof(frame.raw)) {
             fprintf(stderr, "Read: status=%d native_error=%u\n", result.status, result.native_error);
             exit_code = 1;

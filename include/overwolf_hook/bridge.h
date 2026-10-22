@@ -35,8 +35,11 @@ enum {
     OWH_INCOMPATIBLE = 8,
     OWH_CORRUPT = 9,
     OWH_SYSTEM_ERROR = 10,
-    OWH_RESOURCE_EXHAUSTED = 11
+    OWH_RESOURCE_EXHAUSTED = 11,
+    OWH_CANCELLED = 12,
+    OWH_TIMEOUT = 13
 };
+#define OWH_WAIT_INFINITE UINT32_MAX
 
 /** Status and original Win32 error when applicable; no thread-local error state. */
 typedef struct owh_result {
@@ -56,7 +59,7 @@ typedef struct owh_record {
 
 /** Creates one bounded channel in the current Windows session. Channel names are
  *  1..100 ASCII letters/digits/'-'/'.'/'_'. No hidden process discovery or hooks.
- *  Limits: 1..4096 slots, 1..65536 bytes/record, <=16 MiB total mapping.
+ *  Limits: 1..4096 slots, 1..65536 bytes/record, <=16 MiB total mapping, 64 readers.
  *  Objects use the caller's default Windows security descriptor.
  */
 OWH_CAPTURE owh_result __cdecl owh_writer_create(uint32_t abi_version,
@@ -91,6 +94,20 @@ OWH_CLIENT owh_result __cdecl owh_reader_open(uint32_t abi_version,
  */
 OWH_CLIENT owh_result __cdecl owh_reader_next(owh_reader* reader, void* bytes,
     uint32_t capacity, owh_record* record);
+/** Wait for a complete record, close, producer death or cancellation. Timeout is
+ * in milliseconds; OWH_WAIT_INFINITE waits without a deadline. Uses a private
+ * per-reader notification, not timed polling. TIMEOUT does not advance the cursor.
+ * CLOSED drains retained records first; CANCELLED aborts immediately. The bridge
+ * wire protocol must support notifications; old channels fail INCOMPATIBLE.
+ */
+OWH_CLIENT owh_result __cdecl owh_reader_receive(owh_reader* reader, void* bytes,
+    uint32_t capacity, uint32_t timeout_ms, owh_record* record);
+/** Terminal cancellation of this reader, safe concurrently with next/receive.
+ * Pending and future reads return CANCELLED. Does not stop the writer or peers.
+ * After cancellation, join reading calls before close; close itself must not race
+ * any operation on the same handle.
+ */
+OWH_CLIENT owh_result __cdecl owh_reader_cancel(owh_reader* reader);
 OWH_CLIENT void __cdecl owh_reader_close(owh_reader* reader);
 
 #ifdef __cplusplus

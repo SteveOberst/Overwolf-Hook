@@ -15,3 +15,7 @@ __pycache__/
 /examples/kotlin/.gradle/
 /examples/kotlin/.kotlin/
 /examples/kotlin/build/
+
+/jvm/kotlin/.gradle/
+/jvm/kotlin/.kotlin/
+/jvm/kotlin/build/
