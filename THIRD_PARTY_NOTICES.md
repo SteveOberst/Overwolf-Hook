@@ -30,8 +30,8 @@ The JVM build uses the [Gradle Wrapper](https://github.com/gradle/gradle), licen
 under Apache-2.0. Its scripts retain upstream copyright and license notices.
 The wrapper targets Gradle 9.3.0; its distribution checksum is pinned in each
 `gradle-wrapper.properties`. The upstream license and notice are preserved in
-[third_party/Gradle.LICENSE.txt](third_party/Gradle.LICENSE.txt) and
-[third_party/Gradle.NOTICE.txt](third_party/Gradle.NOTICE.txt). Standalone JVM
+[third_party/Gradle.LICENSE.txt](https://github.com/SteveOberst/Overwolf-Hook/blob/main/third_party/Gradle.LICENSE.txt) and
+[third_party/Gradle.NOTICE.txt](https://github.com/SteveOberst/Overwolf-Hook/blob/main/third_party/Gradle.NOTICE.txt). Standalone JVM
 starters carry their own copies so the downloaded projects retain those notices.
 The Kotlin API depends on [Kotlin](https://github.com/JetBrains/kotlin) and
 [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines), licensed under

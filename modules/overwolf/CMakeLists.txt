@@ -14,8 +14,7 @@ set(passive_sources
     include/owh/overwolf/signatures/overlay_targets.hpp
     include/owh/overwolf/signatures/lifecycle_targets.hpp
     include/owh/overwolf/signatures/event_resolver.hpp
-    include/owh/overwolf/signatures/event_targets.hpp
-    include/owh/overwolf/event_channels.hpp)
+    include/owh/overwolf/signatures/event_targets.hpp)
 add_library(owh_overwolf_passive STATIC ${passive_sources})
 owh_configure_native(owh_overwolf_passive)
 target_include_directories(owh_overwolf_passive PUBLIC include)

@@ -5,7 +5,7 @@
 > close and waits up to ten seconds for that process to exit before launching
 > it again. It never force-kills Overwolf; tray-shutdown routing is not proven
 > for every version. If Overwolf is absent, attach starts it. SDK close does
-> not stop Overwolf. Read [attach modes](../../docs/reference/contracts.md#attach-modes)
+> not stop Overwolf. Read [attach modes](https://SteveOberst.github.io/Overwolf-Hook/reference/contracts/#attach-modes)
 > before changing the mode.
 
 Copy this directory for an independent C17 application. It does not build the SDK or participate in product tests.
@@ -22,4 +22,4 @@ CMake deploys the matching Client and Agent DLLs beside the executable. For Visu
 
 For live output, start Overwolf and a compatible game with its overlay enabled, then run `./build/Release/first_overlay.exe`. The sample submits an opaque orange panel and keeps the source open until you press Enter. A successful submission does not confirm that Overwolf displayed it.
 
-See the [installation guide](../../docs/getting-started/installation.md) and [first-overlay task](../../docs/overlays/first-overlay.md). This project is MIT licensed.
+See the [installation guide](https://SteveOberst.github.io/Overwolf-Hook/getting-started/installation/) and [first-overlay task](https://SteveOberst.github.io/Overwolf-Hook/overlays/first-overlay/). This project is MIT licensed.
