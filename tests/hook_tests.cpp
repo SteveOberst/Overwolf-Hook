@@ -1,16 +1,21 @@
-#include <overwolf_hook/bridge.h>
 #include <MinHook.h>
-#include <windows.h>
+#include <cstring>
 #include <iostream>
+#include <owh/ipc/event_log.hpp>
 #include <stdexcept>
 #include <string>
+#include <windows.h>
 
-#define REQUIRE(test) do { if (!(test)) throw std::runtime_error(#test); } while (false)
+#define REQUIRE(test)                                                                              \
+    do {                                                                                           \
+        if (!(test))                                                                               \
+            throw std::runtime_error(#test);                                                       \
+    } while (false)
 
 namespace {
-using Dispatch = uint32_t(__cdecl*)(uint32_t);
+using Dispatch = uint32_t(__cdecl *)(uint32_t);
 Dispatch original = nullptr;
-owh_writer* writer = nullptr;
+std::unique_ptr<overwolf_hook::ipc::EventLog> writer;
 uint32_t forwarded = 0;
 uint32_t rejected = 0;
 thread_local bool inside = false;
@@ -23,8 +28,13 @@ uint32_t __cdecl intercepted(uint32_t value) noexcept {
     const DWORD original_error = GetLastError();
     if (!inside) {
         inside = true;
-        if (owh_writer_publish(writer, &value, sizeof(value)).status == OWH_OK) ++forwarded;
-        else ++rejected;
+        overwolf_hook::core::CapturedEvent payload{};
+        payload.raw_size = sizeof(payload.raw);
+        std::memcpy(payload.raw, &value, sizeof(value));
+        if (writer && writer->publish(payload).status == OWH_OK)
+            ++forwarded;
+        else
+            ++rejected;
         inside = false;
     }
     SetLastError(original_error);
@@ -32,55 +42,77 @@ uint32_t __cdecl intercepted(uint32_t value) noexcept {
 }
 struct Experiment {
     HMODULE fixture = nullptr;
-    void* target = nullptr;
+    void *target = nullptr;
     bool initialized = false;
     bool created = false;
     bool enabled = false;
-    owh_reader* reader = nullptr;
+    std::unique_ptr<overwolf_hook::ipc::EventCursor> reader;
     ~Experiment() {
         // Test is single-threaded; no callback can be in flight here.
-        if (enabled) MH_DisableHook(target);
-        if (created) MH_RemoveHook(target);
-        if (initialized) MH_Uninitialize();
-        owh_reader_close(reader);
-        if (writer) { owh_writer_close(writer); writer = nullptr; }
-        if (fixture) FreeLibrary(fixture);
+        if (enabled)
+            MH_DisableHook(target);
+        if (created)
+            MH_RemoveHook(target);
+        if (initialized)
+            MH_Uninitialize();
+        reader.reset();
+        if (writer) {
+            (void)writer->close();
+            writer.reset();
+        }
+        if (fixture)
+            FreeLibrary(fixture);
     }
 };
-}
+} // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     try {
         REQUIRE(argc == 2);
         Experiment experiment;
-        experiment.fixture = LoadLibraryA(argv[1]); REQUIRE(experiment.fixture);
-        experiment.target = reinterpret_cast<void*>(GetProcAddress(experiment.fixture, "fixture_dispatch"));
+        experiment.fixture = LoadLibraryA(argv[1]);
+        REQUIRE(experiment.fixture);
+        experiment.target =
+            reinterpret_cast<void *>(GetProcAddress(experiment.fixture, "fixture_dispatch"));
         REQUIRE(experiment.target);
         const auto dispatch = reinterpret_cast<Dispatch>(experiment.target);
         const uint32_t expected = (7u ^ 0x5a5a5a5au) + 17u;
         REQUIRE(dispatch(7) == expected);
         const auto name = "hook-" + std::to_string(GetCurrentProcessId());
-        REQUIRE(owh_writer_create(1, name.c_str(), 8, 16, &writer).status == OWH_OK);
-        REQUIRE(owh_reader_open(1, name.c_str(), OWH_RETAINED, &experiment.reader).status == OWH_OK);
-        REQUIRE(MH_Initialize() == MH_OK); experiment.initialized = true;
-        REQUIRE(MH_CreateHook(experiment.target, reinterpret_cast<void*>(&intercepted),
-            reinterpret_cast<void**>(&original)) == MH_OK); experiment.created = true;
-        REQUIRE(MH_EnableHook(experiment.target) == MH_OK); experiment.enabled = true;
+        writer = overwolf_hook::ipc::EventLog::create(name.c_str(), 8);
+        overwolf_hook::Handle wake(CreateEventW(nullptr, FALSE, FALSE, nullptr));
+        overwolf_hook::Handle closed(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        auto opened = overwolf_hook::ipc::EventCursor::open(name.c_str(), writer->position(), 0,
+            GetCurrentProcess(), reinterpret_cast<uint64_t>(wake.get()), reinterpret_cast<uint64_t>(closed.get()));
+        REQUIRE(opened.first.status == OWH_OK);
+        experiment.reader = std::move(opened.second);
+        REQUIRE(MH_Initialize() == MH_OK);
+        experiment.initialized = true;
+        REQUIRE(MH_CreateHook(experiment.target, reinterpret_cast<void *>(&intercepted),
+                              reinterpret_cast<void **>(&original)) == MH_OK);
+        experiment.created = true;
+        REQUIRE(MH_EnableHook(experiment.target) == MH_OK);
+        experiment.enabled = true;
         REQUIRE(dispatch(7) == expected && forwarded == 1 && rejected == 0);
         REQUIRE(GetLastError() == 1234);
-        uint32_t received = 0; owh_record record{};
-        REQUIRE(owh_reader_next(experiment.reader, &received, sizeof(received), &record).status == OWH_OK);
+        owh_event record{};
+        REQUIRE(experiment.reader->poll(record).status == OWH_OK);
+        uint32_t received = 0;
+        std::memcpy(&received, record.raw, sizeof(received));
         REQUIRE(received == 7 && record.sequence == 1);
         // A broken capture path must not change the original function's result.
-        REQUIRE(owh_writer_close(writer).status == OWH_OK); writer = nullptr;
+        REQUIRE(writer->close(100).status == OWH_OK);
+        writer.reset();
         REQUIRE(dispatch(7) == expected && rejected == 1);
         REQUIRE(GetLastError() == 1234);
-        REQUIRE(MH_DisableHook(experiment.target) == MH_OK); experiment.enabled = false;
+        REQUIRE(MH_DisableHook(experiment.target) == MH_OK);
+        experiment.enabled = false;
         REQUIRE(dispatch(7) == expected && forwarded == 1 && rejected == 1);
-        REQUIRE(owh_reader_next(experiment.reader, &received, sizeof(received), &record).status == OWH_CLOSED);
+        REQUIRE(experiment.reader->poll(record).status == OWH_CLOSED);
         std::cout << "PASS trampoline, raw forwarding, failure isolation, disable\n";
         return 0;
-    } catch (const std::exception& error) {
-        std::cerr << "FAIL " << error.what() << '\n'; return 1;
+    } catch (const std::exception &error) {
+        std::cerr << "FAIL " << error.what() << '\n';
+        return 1;
     }
 }

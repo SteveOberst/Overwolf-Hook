@@ -1,0 +1,7 @@
+// Method identity, C++ method name, wire ID, request, response.
+OWH_METHOD(CreatePixelBufferSource, create_pixel_buffer, 4, CreatePixelBufferSourceRequest, CreateSourceResponse)
+OWH_METHOD(ReleaseOverlay, close, 5, SourceRequest, ResultResponse)
+OWH_METHOD(BindD3D11, bind_texture, 6, BindD3D11Request, ResultResponse)
+OWH_METHOD(GetOverlayInfo, get_info, 7, SourceRequest, OverlayInfoResponse)
+OWH_METHOD(CreateSharedTextureSource, create_shared_texture, 11, CreateSharedTextureSourceRequest, CreateSourceResponse)
+OWH_METHOD(GetOverlayCapabilities, capabilities, 2, Empty, OverlayCapabilitiesResponse)

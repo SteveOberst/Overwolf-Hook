@@ -1,29 +1,22 @@
 package dev.sxlver.overwolfhook.kotlin
 
-import dev.sxlver.overwolfhook.Capture
-import dev.sxlver.overwolfhook.EventReader
-import dev.sxlver.overwolfhook.OverwolfHook
+import dev.sxlver.overwolfhook.EventSubscription
+import dev.sxlver.overwolfhook.GameStateStorage
+import java.time.Duration as JavaDuration
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.toJavaDuration
 
-/** Blocking receive with a Kotlin timeout. INFINITE has no deadline; finite values
- * must be non-negative whole milliseconds and obey the Java SDK's native bounds.
- */
-fun Capture.receive(timeout: Duration): EventReader.Result =
-    if (timeout == Duration.INFINITE) receive() else receive(timeout.wholeMilliseconds())
+fun EventSubscription.receive(timeout: Duration) = receive(timeout.wholeJavaDuration())
+fun GameStateStorage.read(timeout: Duration) = read(timeout.wholeJavaDuration().toMillis())
 
-/** Same blocking receive contract as [Capture.receive], for an independent reader. */
-fun EventReader.receive(timeout: Duration): EventReader.Result =
-    if (timeout == Duration.INFINITE) receive() else receive(timeout.wholeMilliseconds())
-
-/** Explicit blocking state read; the SDK retains its 0..1000 ms lock-timeout bound. */
-fun OverwolfHook.readState(sourceChannel: Long, lockTimeout: Duration): OverwolfHook.State =
-    readState(sourceChannel, lockTimeout.wholeMilliseconds())
-
-internal fun Duration.wholeMilliseconds(): java.time.Duration {
-    require(isFinite() && this >= Duration.ZERO && inWholeMilliseconds.milliseconds == this) {
-        "Timeout must be finite, non-negative whole milliseconds"
+internal fun Duration.wholeJavaDuration(): JavaDuration {
+    require(isFinite() && this >= Duration.ZERO && inWholeMilliseconds.milliseconds == this && inWholeMilliseconds <= 4_294_967_294L) {
+        "Timeout must be finite whole milliseconds from 0 to 4294967294"
     }
     return toJavaDuration()
 }
+
+/** Infinite Kotlin waits use Java's null timeout, never a rejected finite sentinel. */
+internal fun Duration.optionalJavaTimeout(): JavaDuration? =
+    if (this == Duration.INFINITE) null else wholeJavaDuration()

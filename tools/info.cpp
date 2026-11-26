@@ -1,5 +1,4 @@
-#include <overwolf_hook/discovery.h>
-#include <overwolf_hook/state.h>
+#include <overwolf_hook/overwolf_hook.hpp>
 #include "capture_control.hpp"
 #include <cstring>
 #include <fstream>
@@ -23,8 +22,14 @@ struct Signal {
     }
     ~Signal() { SetConsoleCtrlHandler(interrupt, FALSE); CloseHandle(event); }
 };
-struct Channels { owh_channels* value = nullptr; ~Channels() { owh_channels_close(value); } };
-struct State { owh_state* value = nullptr; ~State() { owh_state_close(value); } };
+overwolf_hook::OverwolfHook& sdk() { static auto context = overwolf_hook::OverwolfHook::open(); return context; }
+std::vector<owh_source_channel> sources() {
+    auto list = sdk().game_state().sources();
+    std::vector<owh_source_channel> values;
+    values.reserve(list.count());
+    for (uint32_t i=0; i<list.count(); ++i) values.push_back(list.at(i));
+    return values;
+}
 std::string hex(const void* data, size_t size) {
     constexpr char digits[] = "0123456789abcdef";
     const auto* bytes = static_cast<const unsigned char*>(data);
@@ -33,15 +38,18 @@ std::string hex(const void* data, size_t size) {
     return output;
 }
 std::string read(uint32_t channel) {
-    State state;
-    const auto result = owh_state_read(OWH_ABI_VERSION, channel, 100, &state.value);
     std::ostringstream out;
-    out << "\"status\":" << result.status << ",\"native_error\":" << result.native_error;
+    std::optional<overwolf_hook::StateSnapshot> state;
+    owh_result result{OWH_OK,0,0,0,0};
+    try { state.emplace(sdk().game_state().read(channel)); }
+    catch (const overwolf_hook::NativeError& error) { result = error.result(); }
+    out << "\"status\":" << result.status << ",\"failure_stage\":" << result.failure_stage
+        << ",\"error_domain\":" << result.error_domain << ",\"native_code\":" << result.native_code;
     if (result.status != OWH_OK) return out.str();
     out << ",\"fields\":[";
-    for (uint32_t i = 0; i < owh_state_count(state.value); ++i) {
-        owh_state_field field{};
-        if (owh_state_at(state.value, i, &field).status != OWH_OK) throw std::runtime_error("Invalid owned state field");
+    for (uint32_t i = 0; i < state->count(); ++i) {
+        const auto field_view = state->at(i);
+        const auto& field = field_view.native();
         if (i) out << ',';
         // Names as hex also retain non-UTF-8 bytes without invalid JSON or escaping ambiguity.
         out << "{\"category_hex\":\"" << hex(field.category, std::strlen(field.category))
@@ -62,13 +70,10 @@ int wmain(int argc, wchar_t** argv) {
     try {
         using namespace overwolf_hook::controller;
         if (argc == 2 && std::wstring_view(argv[1]) == L"list") {
-            Channels channels;
-            const auto result = owh_channels_discover(OWH_ABI_VERSION, &channels.value);
-            if (result.status != OWH_OK) throw std::runtime_error("Discovery failed: " + std::to_string(result.status) + "/" + std::to_string(result.native_error));
+            const auto channels = sources();
             std::cout << "{\"channels\":[";
-            for (uint32_t i = 0; i < owh_channels_count(channels.value); ++i) {
-                owh_source_channel channel{};
-                if (owh_channels_at(channels.value, i, &channel).status != OWH_OK) throw std::runtime_error("Invalid channel");
+            for (uint32_t i = 0; i < channels.size(); ++i) {
+                const auto& channel = channels[i];
                 if (i) std::cout << ',';
                 std::cout << "{\"source_channel\":" << channel.source_channel << ",\"kinds\":" << channel.kinds << '}';
             }
@@ -110,20 +115,20 @@ int wmain(int argc, wchar_t** argv) {
         bool discovery_failed = false;
         std::cout << "info recording started\n" << std::flush;
         while (control.reason() == StopReason::None) {
-            Channels channels;
-            const auto result = owh_channels_discover(OWH_ABI_VERSION, &channels.value);
+            std::vector<owh_source_channel> channels;
+            owh_result result{OWH_OK,0,0,0,0};
+            try { channels = sources(); } catch(const overwolf_hook::NativeError& error) { result = error.result(); }
             LARGE_INTEGER now{}; QueryPerformanceCounter(&now);
             const auto time = "\"received_qpc\":\"" + std::to_string(now.QuadPart) + "\",\"filetime_utc\":\"" + std::to_string(utc()) + "\"";
             if (result.status != OWH_OK) {
-                write("{" + time + ",\"discovery_status\":" + std::to_string(result.status) + ",\"native_error\":" + std::to_string(result.native_error) + "}\n");
+                write("{" + time + ",\"discovery_status\":" + std::to_string(result.status) + ",\"failure_stage\":" + std::to_string(result.failure_stage) + ",\"error_domain\":" + std::to_string(result.error_domain) + ",\"native_code\":" + std::to_string(result.native_code) + "}\n");
                 previous.clear(); discovery_failed = true; enumeration_known = false;
             } else {
                 if (discovery_failed) { write("{" + time + ",\"discovery_status\":0}\n"); discovery_failed = false; }
                 std::map<uint32_t, std::string> current;
                 std::vector<uint32_t> discovered;
-                for (uint32_t i = 0; i < owh_channels_count(channels.value); ++i) {
-                    owh_source_channel channel{};
-                    if (owh_channels_at(channels.value, i, &channel).status != OWH_OK) throw std::runtime_error("Invalid discovered channel");
+                for (uint32_t i = 0; i < channels.size(); ++i) {
+                    const auto& channel = channels[i];
                     if (!(channel.kinds & OWH_CHANNEL_INFO)) continue;
                     discovered.push_back(channel.source_channel);
                     auto value = read(channel.source_channel);

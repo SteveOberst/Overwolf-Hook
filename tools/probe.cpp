@@ -1,333 +1,260 @@
-#include <overwolf_hook/probe.h>
-#include "capture_control.hpp"
-#include <thread>
-#include <functional>
 #include <windows.h>
-#include <tlhelp32.h>
+#include "capture_control.hpp"
+#include "capture_recording.hpp"
 #include <algorithm>
-#include <charconv>
-#include <cstring>
+#include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
+#include <overwolf_hook/overwolf_hook.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <thread>
 
 namespace {
 HANDLE console_stop = nullptr;
 HANDLE console_done = nullptr;
 BOOL WINAPI console_handler(DWORD signal) {
     if (signal != CTRL_C_EVENT && signal != CTRL_BREAK_EVENT && signal != CTRL_CLOSE_EVENT &&
-        signal != CTRL_LOGOFF_EVENT && signal != CTRL_SHUTDOWN_EVENT) return FALSE;
+        signal != CTRL_LOGOFF_EVENT && signal != CTRL_SHUTDOWN_EVENT)
+        return FALSE;
     SetEvent(console_stop);
-    // Console-close otherwise terminates us as soon as this handler returns.
-    // The owner-process watcher remains the fallback if Windows' deadline wins.
-    if (signal != CTRL_C_EVENT && signal != CTRL_BREAK_EVENT) WaitForSingleObject(console_done, 4000);
+    if (signal != CTRL_C_EVENT && signal != CTRL_BREAK_EVENT)
+        WaitForSingleObject(console_done, 4000);
     return TRUE;
 }
-[[noreturn]] void error(const char* what) {
+[[noreturn]] void error(const char *what) {
     throw std::runtime_error(std::string(what) + " (Win32 " + std::to_string(GetLastError()) + ")");
 }
 struct Handle {
     HANDLE value = nullptr;
-    ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
-};
-struct Module { uintptr_t base; std::wstring path; };
-Module module(DWORD pid, const std::wstring& name, bool exact_path = false) {
-    Handle snapshot{CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)};
-    if (snapshot.value == INVALID_HANDLE_VALUE) error("Module snapshot failed");
-    MODULEENTRY32W entry{}; entry.dwSize = sizeof(entry);
-    if (!Module32FirstW(snapshot.value, &entry)) error("Module enumeration failed");
-    do {
-        if (_wcsicmp(exact_path ? entry.szExePath : entry.szModule, name.c_str()) == 0)
-            return {reinterpret_cast<uintptr_t>(entry.modBaseAddr), entry.szExePath};
-    } while (Module32NextW(snapshot.value, &entry));
-    return {};
-}
-uint64_t created(HANDLE process) {
-    FILETIME a{}, b{}, c{}, d{};
-    if (!GetProcessTimes(process, &a, &b, &c, &d)) error("Process identity unavailable");
-    return (uint64_t{a.dwHighDateTime} << 32) | a.dwLowDateTime;
-}
-struct RemoteBuffer {
-    HANDLE process;
-    void* address;
-    RemoteBuffer(HANDLE process, const void* data, size_t size) : process(process) {
-        address = VirtualAllocEx(process, nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-        if (!address) error("Remote argument allocation failed");
-        SIZE_T written;
-        if (data && (!WriteProcessMemory(process, address, data, size, &written) || written != size)) {
-            VirtualFreeEx(process, address, 0, MEM_RELEASE); error("Remote argument write failed");
-        }
+    ~Handle() {
+        if (value && value != INVALID_HANDLE_VALUE)
+            CloseHandle(value);
     }
-    ~RemoteBuffer() { if (address) VirtualFreeEx(process, address, 0, MEM_RELEASE); }
-    void read(void* output, size_t size) const {
-        SIZE_T copied;
-        if (!ReadProcessMemory(process, address, output, size, &copied) || copied != size)
-            error("Remote diagnostics read failed");
-    }
-};
-DWORD call(HANDLE process, uintptr_t entry, RemoteBuffer* argument = nullptr) {
-    Handle thread{CreateRemoteThread(process, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(entry),
-        argument ? argument->address : nullptr, 0, nullptr)};
-    if (!thread.value) error("Explicit remote call failed");
-    if (WaitForSingleObject(thread.value, 15000) != WAIT_OBJECT_0) {
-        // Never terminate a host thread or free an argument it may still use.
-        if (argument) argument->address = nullptr;
-        throw std::runtime_error("Remote call did not finish; argument retained, owner-exit shutdown applies");
-    }
-    DWORD result;
-    if (!GetExitCodeThread(thread.value, &result)) error("Remote result unavailable");
-    return result;
-}
-uintptr_t remote_system_function(DWORD pid, const char* name) {
-    const auto local = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), name);
-    if (!local) error("System function unavailable");
-    HMODULE containing = nullptr;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(local), &containing)) error("Forwarded system function module unavailable");
-    wchar_t path[32768];
-    if (!GetModuleFileNameW(containing, path, 32768)) error("System module path unavailable");
-    const auto remote = module(pid, std::filesystem::path(path).filename().wstring());
-    if (!remote.base) error("Target system module unavailable");
-    return remote.base + reinterpret_cast<uintptr_t>(local) - reinterpret_cast<uintptr_t>(containing);
-}
-struct Session {
-    HANDLE process;
-    uintptr_t stop = 0;
-    bool started = false;
-    ~Session() {
-        if (started && stop && WaitForSingleObject(process, 0) == WAIT_TIMEOUT) {
-            try { call(process, stop); }
-            catch (const std::exception& problem) { std::cerr << "Stop: " << problem.what() << '\n'; }
-        }
-    }
-};
-struct StopMonitor {
-    Handle finished{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
-    std::thread worker;
-    explicit StopMonitor(std::function<void(HANDLE)> operation) {
-        if (!finished.value) error("Cannot create controller completion signal");
-        worker = std::thread([this, operation = std::move(operation)] { operation(finished.value); });
-    }
-    void join() { SetEvent(finished.value); if (worker.joinable()) worker.join(); }
-    ~StopMonitor() { join(); }
 };
 struct ConsoleControl {
     Handle stop{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     Handle done{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     ConsoleControl() {
-        if (!stop.value || !done.value) error("Cannot create controller stop signal");
-        console_stop = stop.value; console_done = done.value;
-        if (!SetConsoleCtrlHandler(console_handler, TRUE)) error("Cannot register console stop handler");
+        if (!stop.value || !done.value)
+            error("Cannot create controller stop signal");
+        console_stop = stop.value;
+        console_done = done.value;
+        if (!SetConsoleCtrlHandler(console_handler, TRUE))
+            error("Cannot register console stop handler");
     }
     ~ConsoleControl() {
         SetEvent(done.value);
         SetConsoleCtrlHandler(console_handler, FALSE);
     }
 };
-void write(HANDLE file, const void* bytes, DWORD count) {
-    DWORD written = 0;
-    if (!WriteFile(file, bytes, count, &written, nullptr) || written != count) error("Raw capture write failed");
+void print_result(const char *operation, const owh_result &result) {
+    std::cerr << operation << " failed: status=" << result.status
+              << " stage=" << result.failure_stage << " domain=" << result.error_domain
+              << " native=0x" << std::hex << result.native_code << std::dec << '\n';
 }
-}
+} // namespace
 
-int wmain(int argc, wchar_t** argv) {
+int wmain(int argc, wchar_t **argv) {
     try {
-        // A distinct verb makes old controllers reject live-only use before any
-        // remote operation. It must never be mistaken for an output filename.
-        wchar_t forever[] = L"0", no_recording[] = L"-";
-        std::vector<wchar_t*> streaming;
-        if (argc >= 2 && std::wstring_view(argv[1]) == L"stream") {
-            if (argc != 4 && argc != 5 && argc != 7 && argc != 9) {
-                std::cerr << "Usage: owh_probe stream <Overwolf PID> <capture DLL absolute path> [all|source-channel] [--stop-file <path>] [--ready-file <path>]\n";
-                return 2;
-            }
-            streaming = {argv[0], argv[2], argv[3], forever, no_recording};
-            for (int i = 4; i < argc; ++i) streaming.push_back(argv[i]);
-            argc = static_cast<int>(streaming.size());
-            argv = streaming.data();
-        }
-        // No generic injection interface: explicitly selected Overwolf host only.
-        if (argc != 5 && argc != 6 && argc != 8 && argc != 10) {
-            std::cerr << "Usage: owh_probe <Overwolf PID> <capture DLL absolute path> <seconds|0=until-stop> <new capture file> [all|source-channel] [--stop-file <path>] [--ready-file <path>]\n";
+        const bool streaming = argc >= 2 && std::wstring_view(argv[1]) == L"stream";
+        const int base = streaming ? 2 : 1;
+        if ((!streaming && argc < 4) || (streaming && argc < 3)) {
+            std::wcerr
+                << L"Usage: owh_controller <Overwolf PID> <seconds|0=until-stop> <new capture "
+                   L"file> [all|source-channel] [--stop-file path] [--ready-file path]\n"
+                << L"       owh_controller stream <Overwolf PID> [all|source-channel] [--stop-file "
+                   L"path] [--ready-file path]\n";
             return 2;
         }
         using namespace overwolf_hook::controller;
-        uint32_t source_channel = OWH_ALL_CHANNELS;
-        if (argc >= 6 && std::wstring_view(argv[5]) != L"all") {
-            const auto value = number(argv[5], "Source must be 'all' or a nonzero uint32 channel ID (not a game ID)");
-            if (!value || value > UINT32_MAX)
-                throw std::runtime_error("Source channel outside 1..4294967295; use 'all' for every event channel");
-            source_channel = static_cast<uint32_t>(value);
+        const auto pid_value = number(argv[base], "PID must be a nonzero uint32");
+        if (!pid_value || pid_value > UINT32_MAX)
+            throw std::runtime_error("PID must be a nonzero uint32");
+        const DWORD pid = static_cast<DWORD>(pid_value);
+        uint64_t seconds = 0;
+        int option_index = base + 1;
+        if (!streaming) {
+            seconds = number(argv[base + 1], "Duration must be whole seconds, or 0 until stop");
+            option_index = base + 3;
+        }
+        uint32_t source_channel = OWH_EVENTS_ALL_CHANNELS;
+        if (option_index < argc && std::wstring_view(argv[option_index]) != L"--stop-file" &&
+            std::wstring_view(argv[option_index]) != L"--ready-file") {
+            if (std::wstring_view(argv[option_index]) != L"all") {
+                const auto value = number(argv[option_index],
+                                          "Source must be 'all' or a nonzero uint32 channel ID");
+                if (!value || value > UINT32_MAX)
+                    throw std::runtime_error("Source channel must fit uint32");
+                source_channel = static_cast<uint32_t>(value);
+            }
+            ++option_index;
         }
         std::filesystem::path stop_file, ready_file;
-        for (int i = 6; i < argc; i += 2) {
+        for (int i = option_index; i < argc; i += 2) {
             const std::wstring_view option = argv[i];
-            auto& path = option == L"--stop-file" ? stop_file : ready_file;
-            if (option != L"--stop-file" && option != L"--ready-file")
-                throw std::runtime_error("Expected --stop-file or --ready-file <path>");
-            if (!path.empty()) throw std::runtime_error("Duplicate controller option");
+            auto &path = option == L"--stop-file" ? stop_file : ready_file;
+            if ((option != L"--stop-file" && option != L"--ready-file") || i + 1 >= argc)
+                throw std::runtime_error("Expected --stop-file or --ready-file followed by a path");
+            if (!path.empty())
+                throw std::runtime_error("Duplicate controller option");
             path = std::filesystem::absolute(argv[i + 1]);
-            if (std::filesystem::exists(path)) throw std::runtime_error("Control file must not already exist");
+            if (std::filesystem::exists(path))
+                throw std::runtime_error("Control file must not already exist");
         }
-        const auto selected_pid = number(argv[1], "PID must be a nonzero uint32");
-        if (!selected_pid || selected_pid > UINT32_MAX) throw std::runtime_error("PID must be a nonzero uint32");
-        const DWORD pid = static_cast<DWORD>(selected_pid);
-        const auto dll = std::filesystem::canonical(argv[2]).wstring();
-        const auto seconds = number(argv[3], "Duration must be whole seconds, or 0 until stop");
         ConsoleControl console;
-        // Validate overflow before any remote operation; no arbitrary duration cap.
         (void)CaptureControl(seconds, console.stop.value, nullptr, stop_file);
-        Handle process{OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
-            PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid)};
-        if (!process.value) error("Cannot open selected Overwolf process");
-        wchar_t image[32768]; DWORD length = 32768;
-        if (!QueryFullProcessImageNameW(process.value, 0, image, &length)) error("Cannot identify target");
-        if (_wcsicmp(std::filesystem::path(image).filename().c_str(), L"Overwolf.exe") != 0)
-            throw std::runtime_error("Target must be Overwolf.exe, never a game process");
-        USHORT machine, native;
-        if (!IsWow64Process2(process.value, &machine, &native) || machine != IMAGE_FILE_MACHINE_UNKNOWN ||
-            native != IMAGE_FILE_MACHINE_AMD64) throw std::runtime_error("Target must be native Windows x64");
-        if (!module(pid, L"OWGameEventsConsumer.dll").base) throw std::runtime_error("Target has no loaded consumer");
-        const bool record_output = streaming.empty();
-        Handle output;
-        if (record_output) {
-            output.value = CreateFileW(argv[4], GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (output.value == INVALID_HANDLE_VALUE) error("Output must be a new writable file");
+        owh_client_options host_options = OWH_CLIENT_OPTIONS_INIT;
+        host_options.process_id = pid;
+        host_options.attach_mode = OWH_ATTACH_HOT;
+        auto sdk = overwolf_hook::OverwolfHook::open();
+        try {
+            sdk.attach(&host_options);
+        } catch (const overwolf_hook::NativeError &failure) {
+            print_result("Host attach", failure.result());
+            return 1;
         }
-        struct Library { HMODULE value; ~Library() { if (value) FreeLibrary(value); } } local{LoadLibraryW(dll.c_str())};
-        if (!local.value) error("Cannot load local capture exports");
-        // LoadLibraryW may be forwarded into KernelBase: resolve its actual module
-        // and rebase that module in the target, never assume identical ASLR bases.
-        auto remote = module(pid, dll, true);
-        if (!remote.base) {
-            RemoteBuffer path(process.value, dll.c_str(), (dll.size() + 1) * sizeof(wchar_t));
-            call(process.value, remote_system_function(pid, "LoadLibraryW"), &path);
-            remote = module(pid, dll, true);
-            if (!remote.base) throw std::runtime_error("Capture DLL did not load (check dependencies/target policy)");
+        const auto caps = sdk.events().capabilities();
+        if (caps.status.status != OWH_OK) {
+            print_result("Event capability", caps.status);
+            return 1;
         }
-        const auto entry = [&](const char* name) {
-            const auto symbol = GetProcAddress(local.value, name);
-            if (!symbol) error("Capture export unavailable");
-            return remote.base + reinterpret_cast<uintptr_t>(symbol) - reinterpret_cast<uintptr_t>(local.value);
+        const owh_event_options options{sizeof(owh_event_options), source_channel};
+        auto capture = sdk.events().subscribe(&options);
+        auto info = capture.info();
+        const auto cleanup = [&] {
+            capture.close();
+            sdk.detach();
         };
-        Session session{process.value, entry("owh_probe_stop")};
-        owh_probe_options options{sizeof(options), OWH_ABI_VERSION, GetCurrentProcessId(), source_channel,
-            created(GetCurrentProcess()), {}};
-        const auto name = "overwolf-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64());
-        std::memcpy(options.channel, name.c_str(), name.size() + 1);
-        RemoteBuffer configuration(process.value, &options, sizeof(options));
-        session.started = true;
-        const DWORD started = call(process.value, entry("owh_probe_start"), &configuration);
-        if (started == OWH_ALREADY_EXISTS) session.started = false;
-        owh_probe_statistics initial{};
-        RemoteBuffer initial_stats(process.value, &initial, sizeof(initial));
-        const DWORD queried = call(process.value, entry("owh_probe_query"), &initial_stats);
-        if (queried == OWH_OK) initial_stats.read(&initial, sizeof(initial));
-        if (started != OWH_OK) {
-            const char* reason = "";
-            if (started == OWH_INCOMPATIBLE) switch (initial.native_error) {
-                case ERROR_PROC_NOT_FOUND: reason = "; reader signatures not found"; break;
-                case ERROR_DUP_NAME: reason = "; reader signatures are ambiguous"; break;
-                case ERROR_INVALID_DATA: reason = "; unexpected reader entry bytes"; break;
-                case ERROR_BAD_EXE_FORMAT: reason = "; invalid consumer PE/function ranges"; break;
-                case ERROR_NOACCESS: reason = "; consumer code could not be read"; break;
-            }
-            throw std::runtime_error("Probe start failed: status " + std::to_string(started) +
-                "; native_error=" + std::to_string(initial.native_error) + reason);
-        }
-        if (queried != OWH_OK) throw std::runtime_error("Probe startup diagnostics unavailable");
-        if (initial.warnings & OWH_PROBE_UNREVIEWED_CONSUMER)
-            std::cerr << "warning: consumer SHA-256 is unreviewed; signatures passed but compatibility is untested and capture may crash the host\n" << std::flush;
-        if (initial.warnings & OWH_PROBE_HASH_UNAVAILABLE)
-            std::cerr << "warning: consumer SHA-256 could not be checked; signatures passed but compatibility is untested and capture may crash the host\n" << std::flush;
-        struct Reader { owh_reader* value = nullptr; ~Reader() { owh_reader_close(value); } } reader;
-        // The newly created channel contains this capture session only. Include
-        // records published between hook enable and this reader opening.
-        if (owh_reader_open(1, options.channel, OWH_RETAINED, &reader.value).status != OWH_OK)
-            throw std::runtime_error("Capture channel unavailable after start");
-        LARGE_INTEGER qpc{}, frequency{};
-        FILETIME utc{};
-        QueryPerformanceCounter(&qpc); QueryPerformanceFrequency(&frequency); GetSystemTimePreciseAsFileTime(&utc);
-        const uint64_t filetime = (uint64_t{utc.dwHighDateTime} << 32) | utc.dwLowDateTime;
-        std::cout << "hook enabled; channel=" << options.channel
-            << "; source=" << (source_channel ? std::to_string(source_channel) : "all")
-            << "; capture=" << (seconds ? std::to_string(seconds) + " seconds" : "until-stop")
-            << "; recording=" << (record_output ? "on" : "off")
-            << "; host_pid=" << pid << "; host_started=" << created(process.value)
-            << "; started_qpc=" << qpc.QuadPart << "; qpc_frequency=" << frequency.QuadPart
-            << "; started_filetime_utc=" << filetime << '\n' << std::flush;
-        // An explicit readiness handshake. Log-file modification notifications
-        // alone are not reliable while the controller still holds that file open.
-        if (!ready_file.empty()) {
-            Handle ready{CreateFileW(ready_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
-            if (ready.value == INVALID_HANDLE_VALUE) error("Cannot create controller readiness file");
-        }
-        CaptureControl capture_control(seconds, console.stop.value, process.value, stop_file);
-        uint64_t received = 0, lost = 0;
-        bool stopped = false;
-        bool target_exited = false;
-        DWORD stop_result = OWH_OK;
-        std::exception_ptr stop_failure;
-        StopMonitor monitor([&](HANDLE finished) {
-            try {
-                const auto reason = capture_control.wait(finished);
-                if (reason == StopReason::None) return;
-                target_exited = reason == StopReason::TargetExited;
-                stop_result = target_exited ? OWH_OK : call(process.value, session.stop);
-                if (stop_result != OWH_OK) throw std::runtime_error("Capture did not stop: " + std::to_string(stop_result));
-                stopped = true;
-            } catch (...) { stop_failure = std::current_exception(); owh_reader_cancel(reader.value); }
-        });
-        for (;;) {
-            owh_probe_frame frame{}; owh_record record{};
-            const auto result = owh_reader_receive(reader.value, &frame, sizeof(frame), OWH_WAIT_INFINITE, &record);
-            if (result.status == OWH_CLOSED || result.status == OWH_CANCELLED) break;
-            if (result.status != OWH_OK || record.size != sizeof(frame))
-                throw std::runtime_error("Invalid capture read: " + std::to_string(result.status));
+        try {
+            Handle output;
+            const bool record_output = !streaming;
             if (record_output) {
-                write(output.value, &record, sizeof(record)); write(output.value, &frame, sizeof(frame));
+                output.value = CreateFileW(argv[base + 2], GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                           CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (output.value == INVALID_HANDLE_VALUE)
+                    error("Output must be a new writable file");
             }
-            ++received; lost += record.lost_before;
-            if (received <= 5) {
-                const auto* end = std::find(frame.raw, frame.raw + 255, 0);
-                std::string event(reinterpret_cast<const char*>(frame.raw), static_cast<size_t>(end - frame.raw));
-                for (auto& c : event) if (c < 32 || c > 126) c = '?';
-                std::cout << "event " << record.sequence << " source=" << frame.source_channel
-                    << ": " << event << '\n' << std::flush;
+            std::cout << "capture active; source="
+                      << (source_channel ? std::to_string(source_channel) : "all") << "; duration="
+                      << (streaming
+                              ? "until-stop"
+                              : (seconds ? std::to_string(seconds) + " seconds" : "until-stop"))
+                      << "; recording=" << (record_output ? "on" : "off") << "; host_pid=" << pid
+                      << "; started_qpc=" << info.started_qpc
+                      << "; qpc_frequency=" << info.qpc_frequency
+                      << "; started_filetime_utc=" << info.started_utc_filetime << '\n'
+                      << std::flush;
+            if (info.warnings & OWH_SUBSCRIPTION_WARNING_UNREVIEWED_CONSUMER)
+                std::cerr << "warning: consumer hash differs from the reviewed reference; "
+                             "structural signatures passed\n";
+            if (info.warnings & OWH_SUBSCRIPTION_WARNING_HASH_UNAVAILABLE)
+                std::cerr
+                    << "warning: consumer hash is unavailable; structural signatures passed\n";
+            if (!ready_file.empty()) {
+                Handle ready{CreateFileW(ready_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                         nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr)};
+                if (ready.value == INVALID_HANDLE_VALUE)
+                    error("Cannot create controller readiness file");
             }
-        }
-        monitor.join();
-        if (capture_control.reason() == StopReason::TargetExited) target_exited = true;
-        if (stop_failure && !target_exited) std::rethrow_exception(stop_failure);
-        if (stopped) session.started = false;
-        if (record_output && !FlushFileBuffers(output.value)) error("Cannot flush capture file");
-        // The host may exit after CLOSED is read but before diagnostics are queried.
-        if (capture_control.reason() == StopReason::TargetExited) target_exited = true;
-        if (target_exited) {
-            session.started = false;
+
+            CaptureControl control(seconds, console.stop.value, nullptr, stop_file);
+            uint64_t received = 0, lost = 0;
+            bool target_exited = false;
+            std::exception_ptr stop_failure;
+            Handle monitor_done{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+            if (!monitor_done.value)
+                error("Cannot create capture monitor signal");
+            owh_cancel *raw_cancel = nullptr;
+            overwolf_hook::check(owh_cancel_create(&raw_cancel));
+            std::unique_ptr<owh_cancel, decltype(&owh_cancel_close)> cancellation(raw_cancel, owh_cancel_close);
+            const owh_wait_options wait{sizeof(wait), OWH_WAIT_INFINITE, raw_cancel};
+            std::thread monitor([&] {
+                try {
+                    const auto reason = control.wait(monitor_done.value);
+                    if (reason == StopReason::None)
+                        return;
+                    target_exited = reason == StopReason::TargetExited;
+                    if (target_exited)
+                        return;
+                    owh_cancel_signal(raw_cancel);
+                } catch (...) {
+                    stop_failure = std::current_exception();
+                    owh_cancel_signal(raw_cancel);
+                }
+            });
+            std::exception_ptr read_failure;
+            try {
+                for (;;) {
+                    owh_event frame{};
+                    try {
+                        auto next = capture.receive(&wait);
+                        if (!next) continue;
+                        frame = *next;
+                    } catch (const overwolf_hook::NativeError &error) {
+                        if (error.result().status == OWH_CLOSED ||
+                            error.result().status == OWH_CANCELLED)
+                            break;
+                        throw;
+                    }
+                    if (record_output && !write_capture_record(output.value, frame))
+                        error("Raw capture write failed");
+                    ++received;
+                    lost += frame.lost_before;
+                    if (received <= 5) {
+                        const auto *end = std::find(frame.raw, frame.raw + 255, 0);
+                        std::string name(reinterpret_cast<const char *>(frame.raw),
+                                         static_cast<size_t>(end - frame.raw));
+                        for (auto &c : name)
+                            if (c < 32 || c > 126)
+                                c = '?';
+                        std::cout << "event " << frame.sequence
+                                  << " source=" << frame.source_channel << ": " << name << '\n';
+                    }
+                }
+            } catch (...) {
+                read_failure = std::current_exception();
+            }
+            SetEvent(monitor_done.value);
+            if (monitor.joinable())
+                monitor.join();
+            if (read_failure)
+                std::rethrow_exception(read_failure);
+            if (target_exited) {
+                cleanup();
+                std::cout << "received=" << received << " bridge_overwrites=" << lost
+                          << " target_exited=1 diagnostics=unavailable\n";
+                return 0;
+            }
+            if (stop_failure)
+                std::rethrow_exception(stop_failure);
+            {
+                try {
+                    info = capture.info();
+                    capture.close();
+                } catch (const overwolf_hook::NativeError &error) {
+                    if (error.result().status != OWH_AGENT_LOST)
+                        throw;
+                    cleanup();
+                    std::cout << "received=" << received << " bridge_overwrites=" << lost
+                              << " target_exited=1 diagnostics=unavailable\n";
+                    return 0;
+                }
+            }
+            if (record_output && !FlushFileBuffers(output.value))
+                error("Cannot flush capture file");
+            cleanup();
             std::cout << "received=" << received << " bridge_overwrites=" << lost
-                << " target_exited=1 diagnostics=unavailable\n";
+                      << " enabled=" << info.hook_enabled << '\n';
             return 0;
+        } catch (...) {
+            cleanup();
+            throw;
         }
-        if (!stopped) {
-            stop_result = call(process.value, session.stop);
-            session.started = stop_result != OWH_OK;
-        }
-        owh_probe_statistics statistics{};
-        RemoteBuffer stats(process.value, nullptr, sizeof(statistics));
-        if (call(process.value, entry("owh_probe_query"), &stats) != OWH_OK)
-            throw std::runtime_error("Capture diagnostics unavailable");
-        SIZE_T read = 0;
-        if (!ReadProcessMemory(process.value, stats.address, &statistics, sizeof(statistics), &read) || read != sizeof(statistics))
-            error("Cannot read capture diagnostics");
-        std::cout << "received=" << received << " bridge_overwrites=" << lost << " calls=" << statistics.calls
-            << " seen=" << statistics.seen << " forwarded=" << statistics.forwarded << " rejected=" << statistics.rejected
-            << " filtered=" << statistics.filtered << " invalid=" << statistics.invalid << " active=" << statistics.active_calls
-            << " enabled=" << statistics.hook_enabled << " stop=" << stop_result << '\n';
-        return stop_result == OWH_OK && !statistics.hook_enabled && !statistics.active_calls ? 0 : 1;
-    } catch (const std::exception& problem) { std::cerr << problem.what() << '\n'; return 1; }
+    } catch (const std::exception &problem) {
+        std::cerr << problem.what() << '\n';
+        return 1;
+    }
 }

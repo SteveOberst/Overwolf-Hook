@@ -1,0 +1,4 @@
+// Method identity, C++ method name, wire ID, request, response.
+OWH_METHOD(Hello, hello, 1, HelloRequest, HelloResponse)
+OWH_METHOD(Detach, detach, 3, Empty, ResultResponse)
+OWH_METHOD(Ping, ping, 12, Empty, ResultResponse)

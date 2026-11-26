@@ -6,7 +6,8 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "initial-version": "0.1.0-beta.1"
+      "initial-version": "1.0.0"
     }
-  }
+  },
+  "prerelease": false
 }

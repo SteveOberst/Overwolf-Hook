@@ -1,0 +1,17 @@
+abi/sdk.h
+abi/game_state.h
+abi/export.h
+abi/overlays.h
+abi/events.h
+abi/wait.h
+abi/overwolf.h
+types/agent.h
+types/build_info.h
+types/client.h
+types/common.h
+types/discovery.h
+types/events.h
+types/wait.h
+types/overlays.h
+types/state.h
+types/overwolf.h

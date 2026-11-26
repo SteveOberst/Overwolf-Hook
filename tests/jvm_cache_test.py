@@ -1,15 +1,15 @@
-"""Two JVMs can extract/load the same packaged build concurrently without overwriting a loaded DLL."""
+"""Two JVMs concurrently extract and load one content-addressed SDK payload."""
 import subprocess
 import sys
 import tempfile
 
 
 def main():
-    java, classpath, capture = sys.argv[1:]
+    java, classpath = sys.argv[1:]
     children = []
     with tempfile.TemporaryDirectory(prefix="owh-shared-cache-") as directory:
         command = [java, "--enable-native-access=ALL-UNNAMED", "-Djava.io.tmpdir=" + directory,
-                   "--class-path", classpath, "JvmSmokeTest", "transport", capture]
+                   "--class-path", classpath, "JvmSmokeTest"]
         try:
             children = [subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
             for child in children:
@@ -18,7 +18,8 @@ def main():
         finally:
             for child in children:
                 if child.poll() is None:
-                    child.kill(); child.communicate(timeout=5)
+                    child.kill()
+                    child.communicate(timeout=5)
 
 
 if __name__ == "__main__":

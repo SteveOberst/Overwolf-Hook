@@ -1,208 +1,132 @@
-# Contributing to Overwolf Hook
+# Contributing
 
-This guide covers changing and testing the library. For installation and use,
-start with the [README](README.md).
+User documentation starts at the [overview](docs/index.md).
 
-## Build and test
+## Build the SDK
 
-Use Windows x64 with Visual Studio 2022 or newer (C++ tools and Windows SDK),
-CMake 3.25+ and Python 3. Automatic jextract downloads also require Python's
-`tarfile` extraction-filter support. Install JDK 25 if building
-the JVM SDK or running FFM examples. Native-only builds do not need Java.
+Use Windows x64, Visual Studio C++ tools and Windows SDK, CMake 3.25+, and Python 3. The JVM build also requires JDK 25. Native-only builds need no Java or Kotlin. For the Visual Studio 2022 toolchain used by CI:
 
 ```powershell
-git clone https://github.com/SteveOberst/Overwolf-Hook.git
-cd Overwolf-Hook
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-cmake --install build --config Release --prefix out/install
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-For Visual Studio 2026, select `-G "Visual Studio 18 2026"`. The included
-`windows-x64` configure preset and `debug`/`release` build/test presets target
-that version. MinHook is fetched through CMake FetchContent with a pinned hash;
-no Overwolf SDK or running game is needed to build.
+`architecture.boundaries` checks resolved includes, the public/private module
+boundary, and Agent ownership of pixel queues. CMake 3.27+ also requests its
+configured product dependency graph on the first configure. With CMake 3.25 or
+3.26, configure twice to enable that graph check; the first run still checks
+source boundaries. CI checks both. The catalog-extension fixture compiles one
+extra method from a temporary catalog to verify the generated proxy and router.
 
-Run one test group with, for example:
+The `windows-x64` preset uses Visual Studio 2022. Visual Studio 2026 uses `windows-x64-vs2026` and CMake 4.2+. Keep local paths in ignored `CMakeUserPresets.json`.
+
+## JVM bindings
+
+`jvm` is one Gradle project. Java is the core API; the optional Kotlin artifact extends its resource model. CMake builds Native only; Gradle owns binding generation, compilation, tests and JVM publication. Set `JAVA_HOME` to JDK 25, build the matching native pair first, then run:
 
 ```powershell
-ctest --test-dir build -C Release -R "^transport\." --output-on-failure
+./jvm/gradlew.bat -p jvm check assemble "-PnativeDirectory=$PWD/build/native/Debug" --no-daemon
 ```
 
-## JVM SDK and generated bindings
+Generated FFM bindings are build outputs: edit public C headers or handwritten APIs and regenerate through Gradle. `publish` stages the JVM artifacts in `jvm/build/repository`. CI runs raw Java FFM fixtures and external Java/Kotlin consumers after both builds; these checks do not belong to the CMake dependency graph.
 
-Set `JAVA_HOME` to JDK 25, then enable the optional JVM build:
+`gradlew check` verifies handle lifetimes, packaged artifacts, and model generation
+from the native declarations. It also checks that new model fields propagate and
+that pointer fields require explicit ownership metadata.
+
+## Internal diagnostic tools
+
+Configure with `-DOWH_BUILD_TOOLS=ON` to build the maintainer-only `owh_info` and `owh_controller` executables and their optional tests. The normal build defaults to OFF; the test presets enable them explicitly. Tools are never installed into the SDK package. Their commands and recording formats are internal and have no public compatibility promise. See [tool notes](tools/README.md).
+
+## Documentation
+
+The documentation toolchain is separate from CMake and Gradle. With Python 3.11 or newer:
 
 ```powershell
-cmake -S . -B build -DOWH_JVM_BINDINGS=ON -DOWH_FFM_TESTS=ON
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+python -m venv .venv-docs
+./.venv-docs/Scripts/python.exe -m pip install -r tools/docs/requirements.txt
+./.venv-docs/Scripts/python.exe tools/docs/build.py build
+./.venv-docs/Scripts/python.exe tools/docs/build.py serve
 ```
 
-The JVM sources are two sibling modules: [jvm/java](jvm/java) owns the Java SDK,
-its jextract configuration and CMake build; [jvm/kotlin](jvm/kotlin) owns the
-optional Kotlin API and its Gradle build. Kotlin depends on the Java SDK.
+On Linux/macOS use `.venv-docs/bin/python`. Preview binds to `127.0.0.1:8000`; stop it with Ctrl+C. The strict build checks local links, fragments, images, Mermaid embeds, and starter downloads. Output is under ignored `build/docs`. Starter archives are made from the existing projects.
 
-The Java SDK has two parts:
+Use **pixel-buffer submission** and **shared-texture binding** for the two overlay
+handoff mechanisms. They do not identify a rendering backend. Use DRAM/VRAM only
+when describing actual storage, and CPU/GPU only for actual hardware work.
+SDK API names use `pixel_buffer` / `PixelBuffer` and `shared_texture` /
+`SharedTexture` (for example, `createPixelBuffer`, `pixelBufferStatus`,
+`createSharedTexture`, `sharedTextureStatus`). Keep real upstream symbol/API
+names, such as Overwolf's `onAcceleratedPaintWidget` and D3D11's
+`CPUAccessFlags`, unchanged. Do not present those names as SDK route names.
 
-- **Generated FFM bindings** in `dev.sxlver.overwolfhook.bindings`: jextract reads
-  the public [C headers](include/overwolf_hook) and generates function bindings,
-  constants and struct layouts. These are build outputs, not checked-in sources.
-- **Handwritten API** in [jvm/java/src/main/java](jvm/java/src/main/java): `OverwolfHook`,
-  `Capture`, `EventReader` and supporting classes provide discovery, owned Java
-  values, native loading and capture lifetime over those bindings.
+Write diagrams directly in Markdown using fenced `mermaid` blocks and standard
+Mermaid syntax, without theme variables or renderer configuration. Keep any
+styling minimal and local to the diagram.
+Keep an `accTitle` and `accDescr` in each diagram. Check the rendered page in both
+site themes after changes: the build checks inclusion and links, while visual
+layout and technical meaning still need review.
 
-[jvm/java/build.py](jvm/java/build.py) downloads the checksum-pinned jextract 25
-from [jvm/java/toolchain.json](jvm/java/toolchain.json), derives the `owh_*`/`OWH_*` symbol
-filter from the headers, generates bindings, and compiles both parts with Java 25.
-The JAR bundles the matching native binaries and licenses. The generator is not
-bundled or run by consumers. `OWH_JEXTRACT` can select a local jextract 25 executable.
+Guides use common task headings with linked `C`, `Java`, and `Kotlin` tabs, in that order.
+When a guide includes a distinct C++ example, put `C++` after `C`.
+Put shared requirements outside tabs and language-specific ownership beside its code.
+Keep H2/H3 headings outside tabs so the page outline only contains visible sections.
+Include runnable source with `pymdownx.snippets` and link the source beside it; do not
+maintain a second inline copy. Keep file, build/run, and expected-result instructions
+visible. Long complete programs can use a closed `??? example "Complete source"`
+listing inside their language tab; keep prerequisites and ownership constraints
+outside the disclosure. The builder runs from the repository root. Use named
+snippet regions rather than line ranges. API reference pages remain language-specific. C operations are grouped by ABI
+header under `docs/reference/c/`; `native-api.md` is the operation index. Shared
+connection/lifetime rules live in `reference/contracts.md`. Record meanings and
+generated layouts live in `reference/data-records.md`; constants live in
+`reference/constants.md`. Keep contributor-only implementation details in
+`development/internals.md`, linked from the user-facing `architecture.md`. Public guides explain the user's task before
+introducing Overwolf internals. Describe overlay handoff as pixel-buffer submission
+or shared-texture binding, independently of how the application renders. Use the
+matching SDK identifiers in examples; keep upstream Overwolf/D3D11 names exact.
 
-Keep ABI changes in the headers and regenerate through the build. Do not patch
-generated Java. Changes to the convenient API belong in its handwritten classes;
-update the C/Java/Kotlin examples when their usage changes.
+Public installation instructions target the released SDK and show automatic CMake/
+Gradle dependency setup for existing applications. Starters are optional. Local
+candidate repositories and release validation belong here, not in the user manual.
+Zensical reads the authored `docs/` tree directly and owns live rebuilds. The
+built-in macros extension reads `version.txt` for the installation page. Dependency
+templates under `docs/assets/integration/` use `@OWH_SDK_VERSION@`; the helper renders
+these into ignored `docs/assets/generated/integration/`, alongside ignored starter
+archives under `docs/downloads/`. Re-run the helper after changing a starter or
+dependency template; ordinary page, snippet and stylesheet edits rebuild through
+Zensical without a second watcher. Test the generated dependency downloads against
+a staged release mirror before release. Do not substitute an unverified public
+download claim. The website is the user manual; the native ZIP contains a link,
+licenses and SDK files, without a second offline docs/starter distribution.
 
-### Optional Kotlin API
 
-[jvm/kotlin](jvm/kotlin) is a separate Gradle library over the Java SDK. Its
-Duration overloads and Flows are handwritten Kotlin; it does not generate more
-FFM bindings, duplicate event/state types, or bundle native binaries a second time.
-The Java/native build remains independent of Kotlin and coroutines.
-
-After the Java SDK build above, stage that exact source-built dependency and run
-the Kotlin tests (all paths below are relative to the repository root):
+On Windows, compile the starter projects and documentation examples as independent
+SDK consumers. Supply matching installed native and locally staged JVM artifacts:
 
 ```powershell
-$version = (Get-Content version.txt).Trim()
-$repository = "$PWD/build/kotlin-test-repository"
-$release = New-Item -ItemType Directory -Force -Path "$repository/v$version"
-Copy-Item "build/jvm/java/Release/overwolf-hook-$version-windows-x64.jar" -Destination $release.FullName
-./examples/kotlin/gradlew.bat -p jvm/kotlin check publish "-I$PWD/tests/kotlin_source_build.init.gradle" "-DoverwolfHookTestRepository=$repository" "-PowhCaptureDll=$PWD/build/Release/owh_capture.dll"
+python tools/docs/smoke.py --sdk-dir C:/sdk/overwolf-hook --ivy-repository C:/sdk/ivy-repository
 ```
 
-`publish` here writes only to `jvm/kotlin/build/repository`; it does not contact a
-public package registry. Its Ivy descriptor declares the Java SDK, Kotlin stdlib
-and coroutine dependencies, so the consumer only declares the Kotlin artifact.
+The work directory must be empty. Use `--work-dir` for another run, `--offline` for
+cached Gradle dependencies, or `--generator "Visual Studio 18 2026"` for VS2026/CMake 4.2+.
+The smoke compiles the starters, every public example (including the named
+Overwolf helper snippets), and installation load checks, then runs separate SDK-loading consumers; it never
+starts their rendering entry points or attaches to Overwolf.
+The Release CI job runs this same smoke after staging matching native/JVM artifacts.
+API header and JVM changes also trigger the documentation site check.
+The site builder extracts C declarations, record layouts and constant values
+from the public-header manifest. Edit the headers rather than generated files;
+add an explanation in `tools/docs/reference.py` when introducing an enum value.
+It is separate from product regression tests. Preserve old page URLs with native
+redirect maps when consolidating articles. Verify changed links, examples and layout
+during editing, then check the complete site on desktop/mobile and in both color schemes.
 
-The [Kotlin example](examples/kotlin) always uses module coordinates. CI copies
-the freshly built SDK and Kotlin JAR/descriptor to a temporary Ivy repository,
-using [the test init script](tests/kotlin_source_build.init.gradle) to redirect
-only our modules. The repository override belongs to tests, not example dependency
-declarations. Exact source-build/example commands are in
-[the CI workflow](.github/workflows/ci.yml).
+## Changes and boundaries
 
-Kotlin tests create our own native bridge through the public C ABI; `owhCaptureDll`
-selects the matching source-built test writer. They test cancellation/closure,
-independent collectors, failures, exact retained bytes/loss and Duration bounds.
-They do not need an Overwolf consumer. The optional owned-host script can also
-run Kotlin capture lifecycle tests when passed its test classpath as a fifth
-argument; its JVM fixtures and requirements are described below.
-`OwnedCaptureTestKt` is a child-JVM test harness in test sources, not a library
-entry point or part of the published JAR.
+Tests belong under `tests` or JVM test source sets. Consumer fixtures use installed CMake packages or staged Ivy artifacts; copyable applications under `starters` remain independent. Public CI does not require Overwolf or a game. Live integration tests require an explicitly selected test session.
 
-## Tests and optional fixtures
+Target only the verified Overwolf main process. Never open, patch, or inject into a game process. Keep private research notes in ignored `.workspace`; do not commit proprietary binaries, decompiler output, or raw recordings. Follow `.editorconfig`, preserve matching Client/Agent builds, and identify breaking changes in Conventional Commits. Session cleanup does not unload the Agent; restart Overwolf before testing a different Agent build.
 
-[CI](.github/workflows/ci.yml) builds and tests Debug and Release, generates the
-JVM SDK, compiles installed C examples, and runs Java/Kotlin examples against
-owned IPC fixtures. The suites cover bridge bounds/loss, independent readers,
-notification races, timeout/cancellation, producer death, state/discovery,
-recording, signature matching and lifecycle. No test injects into a running
-third-party process. Synthetic tests do not certify real-game data coverage.
-
-Additional controller tests can use a locally supplied consumer DLL:
-
-```powershell
-cmake -S . -B build "-DOWH_REVIEWED_CONSUMER=C:/path/to/OWGameEventsConsumer.dll"
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-These tests execute the consumer reader against synthetic storage in our own
-host process. They cover capture, silent-producer shutdown, console/file stop,
-owner death, restart, host exit, and an unchanged-code/changed-hash case. The DLL
-is never downloaded or redistributed. They are not enabled in public CI.
-
-Useful configuration switches:
-
-| Option | Purpose |
-| --- | --- |
-| `OWH_JVM_BINDINGS=ON` | Generate, compile and package the JVM SDK. |
-| `OWH_FFM_TESTS=ON` | Run the standalone Java FFM examples. |
-| `OWH_REVIEWED_CONSUMER` | Enable additional owned-host consumer tests. |
-| `OWH_OVERWOLF_PROBE=OFF` | Omit the event hook/controller; keep state and discovery. |
-| `OWH_HOOK_TESTS=OFF` | Omit trampoline tests; combine with the previous option to avoid MinHook. |
-| `BUILD_TESTING=OFF` | Build without test targets and their prerequisites. |
-
-The bundled JVM SDK requires the event hook/controller to be enabled.
-
-## Consumer compatibility
-
-The reference [profile](src/capture/overwolf/profile.hpp) was reviewed against
-`OWGameEventsConsumer.dll` **2.0.0.5**, from Overwolf **0.311.1.1**:
-
-```text
-SHA-256: 52c417c374c9331b6bb8d13b784cb1ab51ff5f975ff1c51b8ee102a4d16e7426
-```
-
-[reader.cpp](src/capture/overwolf/reader.cpp) matches two body signatures inside
-executable PE x64 function ranges from the exception table. RIP-relative address
-bytes are masked; there is no fixed-address fallback. Exactly one function and
-the expected entry bytes must match, including after restart.
-
-An unknown hash is advisory; structural contradictions are hard errors. A
-signature match alone does not verify private object layouts or semantics. Review
-those assumptions when a consumer changes, retain tests for ambiguity/relocation
-and changed entry bytes, and report unverified behavior explicitly. Do not add
-Overwolf binaries, live recordings or decompiler output to the repository.
-
-## Making changes
-
-| Location | Responsibility |
-| --- | --- |
-| [include/overwolf_hook](include/overwolf_hook) | Public C ABI. |
-| [src](src) | Native state, discovery, bridge and capture implementation. |
-| [jvm/java](jvm/java) | Java SDK, jextract configuration, CMake build and artifact tests. |
-| [jvm/kotlin](jvm/kotlin) | Optional Kotlin API, coroutine tests and Ivy publication. |
-| [tools](tools) | Native controllers and recording inspector. |
-| [tests](tests) | Owned fixtures and executable checks. |
-| [examples](examples) | Consumer examples compiled by CI. |
-
-Follow [.editorconfig](.editorconfig). Keep raw values and explicit failure states
-intact; changes to private transport assumptions need corresponding fixture tests.
-For a pull request, explain the behavior changed and how you verified it. For a
-bug report, include versions, status/Win32 errors and a small reproduction without
-unreviewed raw captures.
-
-### Documentation
-
-Use [GitHub's README guidance](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)
-for the landing page: purpose, benefit, prerequisites and a working first example.
-Keep developer setup and release procedures in this guide. Apply the
-[Diátaxis distinction](https://diataxis.fr/start-here/) between instructions,
-reference and explanation without adding pages merely to fill a template.
-Commands and examples must match code or executed checks; label unreleased
-features and limits explicitly. Keep the native usage before the JVM usage.
-
-## Releases
-
-Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `fix:`
-for fixes, `feat:` for features, and `!` or `BREAKING CHANGE:` for breaking changes.
-[Release Please](.github/workflows/release.yml) opens a version/changelog PR after
-green main builds. Reviewing and merging that PR creates the tagged release;
-the verified Windows ZIP, Java SDK JAR, optional Kotlin JAR/Ivy descriptor and
-`SHA256SUMS` are attached automatically.
-`version.txt` is the build version; the release manifest records the last published
-version. Do not replace published binaries with a different build of the same version.
-
-To package a local native ZIP after building:
-
-```powershell
-cpack --config build/CPackConfig.cmake -C Release -B out
-```
-
-Review that packages contain matching binaries and license notices, and no test
-classes, local recordings or proprietary DLLs. The Kotlin JAR/descriptor are
-separate release assets; they do not change the native ZIP into a Kotlin build.
-CI tests the source-built Kotlin dependency before publication, rather than
-depending on an earlier released JAR.
+Release Please manages versions and release assets. Do not overwrite a published release with binaries from another source or ABI. Pull requests validate docs without deployment; deployment follows a successful stable SDK release and GitHub Pages configuration.
