@@ -46,6 +46,7 @@ jobs:
         shell: pwsh
         run: |
           $native = "$PWD/build/ci/native/${{ matrix.configuration }}"
+          $env:PATH = "$native;$env:PATH"
           $fixture = "$PWD/build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe"
           & $fixture jvm "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/ffm/java/FfmStateRead.java" "$native/owh_client.dll"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
