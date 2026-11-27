@@ -11,7 +11,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
-/** Packaged-artifact handle, cancellation, and borrowed-frame lifetime checks; no host attach. */
+/** Packaged-artifact handle, wait-timeout, and borrowed-frame lifetime checks; no host attach. */
 public final class OverlayContractTest {
     public static void main(String[] args) throws Exception {
         try (var sdk = dev.sxlver.overwolfhook.OverwolfHook.open()) {
@@ -25,7 +25,7 @@ public final class OverlayContractTest {
         frameArenaIsClosedBeforeNativeReleaseAndConsumeIsOneShot();
         failedPreEntryCommitRetainsFrameForDiscard();
         sequentialFrameCloseDiscardsOnce();
-        System.out.println("PASS packaged JVM handle, cancellation, and frame ownership contracts");
+        System.out.println("PASS packaged JVM handle, wait-timeout, and frame ownership contracts");
     }
 
     private static void generatedPixelRegionMatchesNativeFields() {
