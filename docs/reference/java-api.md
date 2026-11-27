@@ -1,3 +1,8 @@
+---
+title: "Java API reference"
+description: "Look up Java controllers, generated models, native loading, errors and resource ownership in the FFM-based Overwolf Hook API."
+---
+
 # Java API
 
 Use this reference to find Java controllers, resource methods, and failure

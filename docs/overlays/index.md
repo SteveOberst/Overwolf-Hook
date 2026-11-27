@@ -1,5 +1,6 @@
 ---
-title: Overlay transfer options
+title: "Create overlays with your own renderer"
+description: "Display your application's rendered images through Overwolf. Compare pixel-buffer submission with experimental D3D11 shared-texture binding."
 ---
 
 # Display your own overlay

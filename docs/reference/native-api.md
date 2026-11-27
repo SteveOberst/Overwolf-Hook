@@ -1,3 +1,8 @@
+---
+title: "C ABI reference"
+description: "Find the public C operations for SDK connections, Overwolf management, overlays, events, game state, waits and cancellation."
+---
+
 # C ABI reference
 
 Look up the low-level C operations for SDK connections, Overwolf management,

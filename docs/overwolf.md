@@ -1,3 +1,8 @@
+---
+title: "Find, start and stop Overwolf"
+description: "Find the Overwolf installation and running process, inspect its version, and request normal start or stop without attaching to the SDK Agent."
+---
+
 # Manage Overwolf
 
 Use `OverwolfController` to find Overwolf's installation and running main process,

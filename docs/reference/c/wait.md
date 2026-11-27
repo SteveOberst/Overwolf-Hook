@@ -1,3 +1,8 @@
+---
+title: "Waits and cancellation: C ABI reference"
+description: "Look up C wait and cancellation operations, timeout results and ownership requirements for interruptible SDK waits."
+---
+
 # Waits and cancellation: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/wait.h>`.

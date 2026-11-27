@@ -1,3 +1,8 @@
+---
+title: "Kotlin API and coroutine reference"
+description: "Look up Kotlin controller properties, event flows, duration helpers and resource rules built on the shared Java API and native models."
+---
+
 # Kotlin API
 
 Use this reference to find Kotlin controller properties, coroutine helpers,

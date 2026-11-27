@@ -1,3 +1,8 @@
+---
+title: "Bind D3D11 shared textures to overlays"
+description: "Bind an existing D3D11 graphics allocation to an Overwolf overlay. Learn experimental-path requirements, resource lifetime and synchronization limits."
+---
+
 <a id="bind-a-d3d11-shared-texture"></a>
 # Bind shared textures
 

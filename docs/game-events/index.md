@@ -1,3 +1,8 @@
+---
+title: "Receive game events in your application"
+description: "Subscribe to raw game-event records supplied by Overwolf providers. Follow C, Java and Kotlin examples for receiving and handling live records."
+---
+
 # Receive game-event records
 
 Receive raw game-event records in your existing native or JVM application,

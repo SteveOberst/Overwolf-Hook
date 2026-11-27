@@ -1,3 +1,8 @@
+---
+title: "Overlays and submissions: C ABI reference"
+description: "Look up C overlay creation, pixel submissions, frame access, shared-texture binding, publication status and resource cleanup."
+---
+
 # Overlays and submissions: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/overlays.h>`.

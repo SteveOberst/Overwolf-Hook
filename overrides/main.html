@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if page and page.canonical_url %}
+    {% set title = (page.meta.title or page.title) ~ " - " ~ config.site_name %}
+    {% set description = page.meta.description or config.site_description %}
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ config.site_name | e }}">
+    <meta property="og:title" content="{{ title | striptags | e }}">
+    <meta property="og:description" content="{{ description | e }}">
+    <meta property="og:url" content="{{ page.canonical_url | e }}">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="{{ title | striptags | e }}">
+    <meta name="twitter:description" content="{{ description | e }}">
+  {% endif %}
+{% endblock %}

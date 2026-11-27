@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import tomllib
 from urllib.parse import unquote, urljoin, urlsplit
+import xml.etree.ElementTree as ET
 import zipfile
 from reference import declarations, enum_constants, public_headers, record_declarations
 from build import SDK_VERSION_TOKEN, render_version
@@ -23,6 +24,11 @@ class Page(HTMLParser):
         self.images: list[str] = []
         self.mermaid: list[str] = []
         self.in_mermaid = False
+        self.title = ""
+        self.in_head = False
+        self.in_title = False
+        self.metadata: dict[str, str] = {}
+        self.canonical_urls: list[str] = []
         self.navigation_links: list[tuple[str, str]] = []
         self.nav_stack: list[bool] = []
         self.nav_link: tuple[str, list[str]] | None = None
@@ -30,6 +36,16 @@ class Page(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         data = dict(attrs)
+        if tag == "head":
+            self.in_head = True
+        if tag == "title" and self.in_head:
+            self.in_title = True
+        if tag == "meta":
+            name = data.get("name") or data.get("property")
+            if name:
+                self.metadata[name] = data.get("content", "")
+        if tag == "link" and "canonical" in data.get("rel", "").split():
+            self.canonical_urls.append(data.get("href", ""))
         if tag == "nav":
             self.nav_stack.append("md-nav--primary" in data.get("class", "").split()
                                   or any(self.nav_stack))
@@ -54,12 +70,18 @@ class Page(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.text.append(data)
+        if self.in_title:
+            self.title += data
         if self.nav_link is not None:
             self.nav_link[1].append(data)
         if self.in_mermaid:
             self.mermaid[-1] += data
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "head":
+            self.in_head = False
+        if tag == "title":
+            self.in_title = False
         if tag == "a" and self.nav_link is not None:
             href, parts = self.nav_link
             self.navigation_links.append((" ".join("".join(parts).split()), href))
@@ -120,6 +142,58 @@ def main() -> int:
             url = base + (relative[:-10] if relative.endswith("index.html") else relative)
             if (title, url) not in links:
                 errors.append(f"Missing named sidebar entry: {title} -> {source}")
+
+    # Navigation identifies content pages; redirects, raw files and 404 are not articles.
+    content_pages = {markdown_page(source)[0]: source for _, source in nav_pages(project["nav"])}
+    titles, descriptions = {}, {}
+    canonical_urls = set()
+    for path, source in content_pages.items():
+        page = pages.get(path)
+        if page is None:
+            errors.append(f"Missing content page: {source}")
+            continue
+        title = page.title.strip()
+        description = page.metadata.get("description", "").strip()
+        for kind, value, seen in (("title", title, titles), ("description", description, descriptions)):
+            if not value:
+                errors.append(f"Missing {kind}: {source}")
+            elif value in seen:
+                errors.append(f"Duplicate {kind}: {source} and {seen[value]}")
+            else:
+                seen[value] = source
+        if description == project.get("site_description"):
+            errors.append(f"Content page uses the global description instead of its own: {source}")
+        relative_url = path.relative_to(site).as_posix().removesuffix("index.html")
+        canonical = urljoin(project["site_url"], relative_url)
+        canonical_urls.add(canonical)
+        if page.canonical_urls != [canonical]:
+            errors.append(f"Canonical URL differs from the published page URL: {source}")
+        for name in ("robots", "googlebot"):
+            rules = page.metadata.get(name, "").lower().replace(",", " ").split()
+            if {"noindex", "none"}.intersection(rules):
+                errors.append(f"Content page excludes indexing with {name}: {source}")
+        for name, expected in (("og:title", title), ("twitter:title", title),
+                               ("og:description", description), ("twitter:description", description),
+                               ("og:url", canonical)):
+            if page.metadata.get(name) != expected:
+                errors.append(f"{name} differs from the page metadata: {source}")
+
+    sitemap = site / "sitemap.xml"
+    sitemap_urls = set()
+    if not sitemap.is_file():
+        errors.append("Missing sitemap.xml")
+    else:
+        sitemap_urls = {item.text for item in ET.parse(sitemap).iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")}
+        for url in sorted(canonical_urls - sitemap_urls):
+            errors.append(f"Content page missing from sitemap: {url}")
+        for url in sorted(sitemap_urls - canonical_urls):
+            errors.append(f"Sitemap includes a non-content URL: {url}")
+
+    verification_files = list((ROOT / "docs").glob("google*.html"))
+    for source in verification_files:
+        target = site / source.name
+        if not target.is_file() or target.read_bytes() != source.read_bytes():
+            errors.append(f"Verification file missing or changed: {source.name}")
 
     anchor_redirects = {markdown_page(source) for source in redirects if urlsplit(source).fragment}
 
@@ -247,6 +321,8 @@ def main() -> int:
         if name.lower() not in pages[constants_page].ids:
             errors.append(f"Public constant lacks an indexed explanation: {name}")
     report = {"html_pages": len(files), "local_links_checked": count,
+              "metadata_pages_checked": len(content_pages), "sitemap_urls_checked": len(sitemap_urls),
+              "verification_files_checked": len(verification_files),
               "mermaid_diagrams_checked": diagram_count,
               "abi_operations_checked": len(abi_functions), "api_models_checked": len(models),
               "enum_constants_checked": len(constants),

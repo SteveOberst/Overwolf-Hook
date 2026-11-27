@@ -1,3 +1,8 @@
+---
+title: "SDK internals and module responsibilities"
+description: "Explore native modules, typed services, shared-memory IPC, startup integration and generated language models when contributing to Overwolf Hook."
+---
+
 # SDK internals
 
 Use this map when changing the native integration, shared-memory transport, or

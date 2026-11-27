@@ -1,3 +1,8 @@
+---
+title: "How the SDK integrates with Overwolf"
+description: "Understand application, Overwolf and game-process boundaries, the SDK Agent, passive state reads and Overwolf's overlay display paths."
+---
+
 # How it works
 
 Understand which part of the SDK runs in your application, what its Agent does

@@ -1,3 +1,8 @@
+---
+title: "Submit pixel buffers for overlay display"
+description: "Send rendered BGRA images through shared memory. Learn frame submission, delivery policies, damage regions and optional direct writes."
+---
+
 <a id="shared-memory-images"></a>
 # Submit pixel buffers
 

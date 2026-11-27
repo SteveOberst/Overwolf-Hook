@@ -1,3 +1,8 @@
+---
+title: "Overwolf management: C ABI reference"
+description: "Look up C operations for discovering Overwolf's installation and process, reading versions, launching it and requesting normal exit."
+---
+
 # Overwolf management: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/overwolf.h>`.
