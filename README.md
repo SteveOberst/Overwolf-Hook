@@ -25,7 +25,7 @@ compatibility. It does not open, modify, or inject into game processes.
 
 **[Read the documentation →](https://SteveOberst.github.io/Overwolf-Hook/)**
 
-## What you can build
+## Features
 
 - **[Game events](https://SteveOberst.github.io/Overwolf-Hook/game-events/):** react
   to changes and occurrences reported by Overwolf's game integrations.
