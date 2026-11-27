@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.5.0-beta.1...v1.0.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace the beta API with the controller-based native and JVM contract and redesigned Client/Agent transport.
+
+### Features
+
+* prepare Overwolf Hook 1.0.0 ([ef4dd75](https://github.com/SteveOberst/Overwolf-Hook/commit/ef4dd756de196255c678ea4585541b81bd8dd643))
+
 ## [0.5.0-beta.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.4.0-beta.1...v0.5.0-beta.1) (2026-10-22)
 
 
