@@ -1,3 +1,8 @@
+---
+title: "Game events: C ABI reference"
+description: "Look up C subscription, event-reading and ownership operations for raw records delivered through the SDK Agent."
+---
+
 # Events: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/events.h>`.

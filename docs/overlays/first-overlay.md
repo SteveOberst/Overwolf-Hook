@@ -1,3 +1,8 @@
+---
+title: "Create your first Overwolf overlay"
+description: "Create a pixel-buffer overlay, submit a simple image and close its resources. Follow complete examples for native and JVM applications."
+---
+
 # Build your first overlay
 
 Create an overlay in your own Windows application, fill one image and keep it

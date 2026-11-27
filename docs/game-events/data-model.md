@@ -1,3 +1,8 @@
+---
+title: "Game-event data, delivery and state correlation"
+description: "Understand event payloads, capture metadata, bounded delivery and the limits of correlating events with game-state snapshots."
+---
+
 # Event data and delivery
 
 Use events to react when a game's provider reports a change or occurrence. A **provider** is the Overwolf component that supplies game information. The SDK copies event records that Overwolf already reads and delivers them to your application. The event names and contents depend on that provider; the SDK does not turn them into a common game-data schema.

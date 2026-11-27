@@ -4,7 +4,10 @@
 [![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)](https://SteveOberst.github.io/Overwolf-Hook/getting-started/installation/)
 [![MIT license](https://img.shields.io/github/license/SteveOberst/Overwolf-Hook)](LICENSE)
 
-**Use Overwolf's game events, game state, and overlays in your own application, without building an app for the Overwolf platform.**
+**An independent Windows SDK for Overwolf game events, game state, and overlays.**
+
+Use C, C++, Java, or Kotlin to integrate them into your own application, without
+building an app for the Overwolf platform.
 
 Sometimes the overhead of [Overwolf's app development and release process](https://dev.overwolf.com/ow-native/getting-started/release-your-app/)
 is more than a small or private project needs. You might only want an overlay

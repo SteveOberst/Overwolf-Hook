@@ -1,3 +1,8 @@
+---
+title: "Attach modes and resource lifetime"
+description: "Understand restart and hot attach, connection ownership, resource lifetime and cleanup rules shared by the native and JVM APIs."
+---
+
 # Connections and resource lifetime
 
 Understand when your application needs an Agent connection, how attach affects

@@ -1,3 +1,8 @@
+---
+title: "Game state: C ABI reference"
+description: "Look up C source discovery, storage access and snapshot-reading operations for state already published by Overwolf."
+---
+
 # Game state: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/game_state.h>`.

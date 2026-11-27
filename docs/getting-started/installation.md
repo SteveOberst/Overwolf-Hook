@@ -1,4 +1,6 @@
 ---
+title: "Install the SDK with CMake or Gradle"
+description: "Add Overwolf Hook to a C, C++, Java or Kotlin application, fetch the matching libraries and verify that the SDK loads before using live features."
 render_macros: true
 ---
 
@@ -262,12 +264,12 @@ For overlays, also enable Overwolf's overlay for your game:
 
 1. Open Overwolf **Settings** from the gear icon.
 
-    ![The Overwolf desktop client with its Settings gear icon highlighted.](../assets/img/overwolf-opn-settings.png)
+    ![The Overwolf desktop client with its Settings gear icon highlighted.](../assets/img/overwolf-opn-settings.png){ width="955" height="708" loading="lazy" }
 
 2. Open **Overlay & Hotkeys**.
 3. Enable the overlay for the game.
 
-    ![Overlay & Hotkeys settings with the per-game overlay switches highlighted.](../assets/img/overwolf-toggle-per-game-overlay.png)
+    ![Overlay & Hotkeys settings with the per-game overlay switches highlighted.](../assets/img/overwolf-toggle-per-game-overlay.png){ width="1024" height="700" loading="lazy" }
 
 The setting names may differ between Overwolf versions. Enabling the overlay does
 not enable additional game-data features.

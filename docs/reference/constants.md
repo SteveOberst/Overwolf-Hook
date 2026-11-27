@@ -1,3 +1,8 @@
+---
+title: "Status codes, constants and flags"
+description: "Look up SDK status codes, failure stages, feature flags, delivery policies and resource states generated from the public C headers."
+---
+
 # Constants and flags
 
 Look up status codes, failure stages, feature flags, queue policies, and resource

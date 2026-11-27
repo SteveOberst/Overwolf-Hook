@@ -1,3 +1,8 @@
+---
+title: "C++ API reference"
+description: "Look up C++ controllers, move-only resources, errors and ownership rules for the header-only facade over the Overwolf Hook C ABI."
+---
+
 # C++ API
 
 Use this reference to find C++ controllers, move-only resources, and error

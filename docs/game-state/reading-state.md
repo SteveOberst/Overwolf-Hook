@@ -1,3 +1,8 @@
+---
+title: "Read game-state snapshots"
+description: "Read state fields already published by Overwolf, select a provider source and interpret snapshots without assuming freshness or universal game support."
+---
+
 <a id="read-the-latest-game-state"></a>
 # Read available game state
 

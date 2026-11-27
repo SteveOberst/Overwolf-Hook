@@ -1,3 +1,8 @@
+---
+title: "Troubleshoot SDK loading and live features"
+description: "Diagnose native loading, Agent connections, missing game data and invisible overlays using SDK error details and feature-specific checks."
+---
+
 # Troubleshooting
 
 Find out whether a failure comes from local library loading, the Agent connection,

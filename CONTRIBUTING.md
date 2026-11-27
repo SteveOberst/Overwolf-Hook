@@ -76,6 +76,12 @@ python -m venv .venv-docs
 
 On Linux/macOS use `.venv-docs/bin/python`. Preview binds to `127.0.0.1:8000`; stop it with Ctrl+C. The strict build checks local links, fragments, images, Mermaid embeds, and starter downloads. Output is under ignored `build/docs`. Starter archives are made from the existing projects.
 
+Give each content page a descriptive `title` and a unique `description` in its
+Markdown front matter. Keep short navigation labels in `zensical.toml`. The
+theme derives search and social-preview metadata from those fields; the site
+check verifies metadata, canonical URLs, and sitemap coverage. Static verification
+files are copied unchanged and are not articles in the navigation or sitemap.
+
 Use **pixel-buffer submission** and **shared-texture binding** for the two overlay
 handoff mechanisms. They do not identify a rendering backend. Use DRAM/VRAM only
 when describing actual storage, and CPU/GPU only for actual hardware work.

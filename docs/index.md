@@ -1,5 +1,6 @@
 ---
-title: Overview
+title: "SDK for game events, state and overlays"
+description: "Use Overwolf game events, game state and custom overlays from C, C++, Java or Kotlin without an approved platform app. The Overwolf desktop client is required."
 ---
 
 # Overwolf Hook
@@ -135,6 +136,7 @@ patches, or injects into it.** See
 
 Use these pages when you need more detail:
 
+- **Source code:** [Overwolf Hook on GitHub](https://github.com/SteveOberst/Overwolf-Hook).
 - **API reference:** [C ABI](reference/native-api.md), [C++](reference/cpp-api.md),
   [Java](reference/java-api.md), and [Kotlin](reference/kotlin-api.md).
 - **Troubleshooting:** [missing data, connection failures, or invisible overlays](troubleshooting.md).

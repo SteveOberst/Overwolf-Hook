@@ -1,3 +1,8 @@
+---
+title: "SDK connections: C ABI reference"
+description: "Look up C context creation, attach, detach, compatibility checks, Agent queries, liveness requests and SDK build information."
+---
+
 # SDK connection: C ABI
 
 Look up the operations declared in `<overwolf_hook/abi/sdk.h>`.

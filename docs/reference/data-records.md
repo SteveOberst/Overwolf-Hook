@@ -1,3 +1,8 @@
+---
+title: "Native and JVM data records"
+description: "Look up fields, defaults, native layouts and generated Java/Kotlin views for the records shared across the SDK's language APIs."
+---
+
 # Data records
 
 Look up the inputs and outputs shared by the C ABI, C++ facade, and generated
