@@ -65,10 +65,11 @@ def stage(source_ref: str, release_tag: str) -> Path:
                 entry = zipfile.ZipInfo(f"{language}-starter/{name}", (1980, 1, 1, 0, 0, 0))
                 entry.external_attr = (0o755 if name == "gradlew" else 0o644) << 16
                 entry.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(entry, path.read_bytes())
+                data = render_version(path.read_bytes(), version)
+                archive.writestr(entry, data)
                 # Source files can also be viewed directly from a tutorial link.
                 if path.suffix != ".md":
-                    put(SOURCE / "downloads" / language / name, path.read_bytes())
+                    put(SOURCE / "downloads" / language / name, data)
         put(SOURCE / "downloads" / f"{language}-starter.zip", buffer.getvalue())
 
     # Only versioned dependency snippets need a generated counterpart. Pages,

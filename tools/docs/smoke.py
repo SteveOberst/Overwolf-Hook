@@ -10,17 +10,19 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from build import render_version, starter_files
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "docs" / "assets" / "examples"
 
 
-def copy_starter(source: Path, destination: Path) -> None:
-    shutil.copytree(
-        source,
-        destination,
-        ignore=shutil.ignore_patterns("build", ".gradle", ".kotlin", "CMakeFiles"),
-    )
+def copy_starter(language: str, destination: Path) -> None:
+    version = (ROOT / "version.txt").read_text().strip()
+    source = ROOT / "starters" / language
+    for path in starter_files(language):
+        target = destination / path.relative_to(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(render_version(path.read_bytes(), version))
 
 
 def run(command: list[str], cwd: Path, report: dict) -> None:
@@ -65,7 +67,7 @@ def main() -> int:
 
         for language in ("java", "kotlin"):
             app = work / language
-            copy_starter(ROOT / "starters" / language, app)
+            copy_starter(language, app)
             source_dir = app / "src" / "main" / language
             source_dir.mkdir(parents=True, exist_ok=True)
             example_dir = source_dir / "docs-examples"
@@ -113,7 +115,7 @@ def main() -> int:
                 app, report)
 
         native = work / "native"
-        copy_starter(ROOT / "starters" / "native", native)
+        copy_starter("native", native)
         c_dir = native / "docs-examples"
         c_dir.mkdir()
         for source in sorted((EXAMPLES / "c").glob("*.c")):

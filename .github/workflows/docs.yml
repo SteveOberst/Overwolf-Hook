@@ -37,7 +37,7 @@ on:
         default: main
         type: string
       release_tag:
-        description: Published SDK tag documented by this source, for example v1.0.0
+        description: Published SDK tag matching version.txt
         required: true
         type: string
 

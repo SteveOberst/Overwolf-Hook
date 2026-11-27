@@ -91,8 +91,11 @@ Public installation instructions target the released SDK and show automatic CMak
 Gradle dependency setup for existing applications. Starters are optional. Local
 candidate repositories and release validation belong here, not in the user manual.
 Zensical reads the authored `docs/` tree directly and owns live rebuilds. The
-built-in macros extension reads `version.txt` for the installation page. Dependency
-templates under `docs/assets/integration/` use `@OWH_SDK_VERSION@`; the helper renders
+built-in macros extension reads `version.txt` for the installation page. The same
+file supplies SDK versions in dependency downloads and standalone JVM starters.
+Keep `sdkVersion` in the starter source files as a template; the website builder
+and consumer smoke resolve it before use. Release Please updates `version.txt`.
+Dependency templates under `docs/assets/integration/` use `@OWH_SDK_VERSION@`; the helper renders
 these into ignored `docs/assets/generated/integration/`, alongside ignored starter
 archives under `docs/downloads/`. Re-run the helper after changing a starter or
 dependency template; ordinary page, snippet and stylesheet edits rebuild through

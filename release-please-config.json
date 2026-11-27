@@ -5,8 +5,7 @@
   "bump-minor-pre-major": true,
   "packages": {
     ".": {
-      "release-type": "simple",
-      "initial-version": "1.0.0"
+      "release-type": "simple"
     }
   },
   "prerelease": false

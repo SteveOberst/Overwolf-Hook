@@ -9,9 +9,9 @@ import tomllib
 from urllib.parse import unquote, urljoin, urlsplit
 import zipfile
 from reference import declarations, enum_constants, public_headers, record_declarations
+from build import SDK_VERSION_TOKEN, render_version
 
 ROOT = Path(__file__).resolve().parents[2]
-SDK_VERSION_TOKEN = b"@OWH_SDK_VERSION@"
 
 
 class Page(HTMLParser):
@@ -132,7 +132,7 @@ def main() -> int:
 
     for path, page in pages.items():
         text = path.read_text(encoding="utf-8")
-        if SDK_VERSION_TOKEN.decode() in text:
+        if SDK_VERSION_TOKEN in text:
             errors.append(f"Unresolved SDK version in {path.relative_to(site)}")
         if re.search(r"(?:[A-Za-z]:[/\\]+Users[/\\]+|/Users/|/home/)", text) or ".workspace/" in text:
             errors.append(f"Local source path leaked into {path.relative_to(site)}")
@@ -173,7 +173,7 @@ def main() -> int:
                     errors.append(f"Invalid archive member: {name}")
                     continue
                 original = ROOT / "starters" / language / Path(*relative.parts[1:])
-                if not original.is_file() or archive.read(name) != original.read_bytes():
+                if not original.is_file() or archive.read(name) != render_version(original.read_bytes(), version):
                     errors.append(f"Starter archive differs from source: {name}")
     for directory in ("examples", "integration"):
         examples = ROOT / "docs/assets" / directory
@@ -181,7 +181,7 @@ def main() -> int:
             if source.is_file():
                 relative = source.relative_to(examples)
                 target = site / "assets" / ("generated/integration" if directory == "integration" else "examples") / relative
-                expected = source.read_bytes().replace(SDK_VERSION_TOKEN, version.encode())
+                expected = render_version(source.read_bytes(), version)
                 if not target.is_file() or target.read_bytes() != expected:
                     errors.append(f"Example download differs from source: {source.relative_to(ROOT / 'docs')}")
     diagram_count = 0

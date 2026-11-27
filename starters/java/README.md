@@ -10,7 +10,7 @@
 
 Copy this directory, including `gradle/wrapper`, for an independent Java application. Requirements: Windows x64, JDK 25 (`JAVA_HOME`), and the x64 Visual C++ Redistributable. No native compiler is required.
 
-The `sdkVersion` Gradle property in `gradle.properties` selects the SDK release; the build downloads its matching native libraries automatically. Update that property to use a different published release.
+The `sdkVersion` Gradle property in `gradle.properties` selects the SDK release; the build downloads its matching native libraries automatically. Website downloads already contain the documented release version. If you copy the raw repository files, replace the placeholder in `gradle.properties` with a published version first. Change `sdkVersion` to upgrade.
 From this directory, run:
 
 ```powershell
