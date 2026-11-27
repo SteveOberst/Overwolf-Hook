@@ -1,12 +1,12 @@
 #include <windows.h>
 #include "session/bootstrap_payload.hpp"
-#include "support/sdk.hpp"
 #include <BuildInfo.hpp>
 #include <overwolf_hook/abi/overlays.h>
 
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 
 namespace {
@@ -51,7 +51,10 @@ int wmain(int argc, wchar_t **argv) {
                         OWH_INVALID_ARGUMENT &&
                     report.passed == 0x12345678,
                 "preflight output size is checked before writing");
-        const auto denied = owh_sdk_attach(owh_test::passive_sdk(), &options);
+        owh_sdk *raw = nullptr;
+        require(owh_sdk_open(&raw).status == OWH_OK && raw, "open local SDK context");
+        const std::unique_ptr<owh_sdk, decltype(&owh_sdk_close)> sdk(raw, owh_sdk_close);
+        const auto denied = owh_sdk_attach(sdk.get(), &options);
         require(denied.status == OWH_NOT_FOUND &&
                     denied.failure_stage == OWH_STAGE_TARGET_DISCOVERY,
                 "exact executable selection rejects an owned fixture before active access");
@@ -67,13 +70,13 @@ int wmain(int argc, wchar_t **argv) {
                 "preflight uses the same canonical option validation as attach");
         options.experimental_features = 0;
         options.attach_mode = 0xffffffffu;
-        require(owh_sdk_attach(owh_test::passive_sdk(), &options).status == OWH_INVALID_ARGUMENT,
+        require(owh_sdk_attach(sdk.get(), &options).status == OWH_INVALID_ARGUMENT,
                 "unknown attach mode rejected before process operations");
         options.attach_mode = OWH_ATTACH_HOT;
-        require(owh_sdk_attach(owh_test::passive_sdk(), &options).status == OWH_NOT_FOUND,
+        require(owh_sdk_attach(sdk.get(), &options).status == OWH_NOT_FOUND,
                 "HOT rejects a non-Overwolf fixture without starting a process");
         options.size -= sizeof(uint32_t);
-        require(owh_sdk_attach(owh_test::passive_sdk(), &options).status == OWH_INVALID_ARGUMENT,
+        require(owh_sdk_attach(sdk.get(), &options).status == OWH_INVALID_ARGUMENT,
                 "invalid sized options rejected before target discovery");
         owh_overlay_capabilities small{};
         small.size = sizeof(small) - sizeof(uint32_t);

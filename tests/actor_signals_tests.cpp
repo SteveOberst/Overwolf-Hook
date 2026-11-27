@@ -7,6 +7,7 @@ namespace {
 std::array<HANDLE, 4> opened{};
 unsigned calls = 0;
 unsigned fail_at = 0;
+struct StartupFailure {};
 HANDLE WINAPI create(LPSECURITY_ATTRIBUTES a, BOOL manual, BOOL initial, LPCWSTR name) {
     const auto index = calls++;
     if (index == fail_at)
@@ -48,8 +49,8 @@ int main() {
             overwolf_hook::platform::ActorSignals signals(create);
             require(signals.command && signals.stop && signals.ready && signals.source,
                     "events not acquired");
-            throw std::runtime_error("simulated thread or actor startup failure");
-        } catch (const std::runtime_error &) {
+            throw StartupFailure{};
+        } catch (const StartupFailure &) {
         }
         closed();
         std::cout << "PASS partial event construction and post-construction "

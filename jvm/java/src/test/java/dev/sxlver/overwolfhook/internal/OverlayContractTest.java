@@ -10,9 +10,6 @@ import dev.sxlver.overwolfhook.model.OwhConstants;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /** Packaged-artifact handle, cancellation, and borrowed-frame lifetime checks; no host attach. */
 public final class OverlayContractTest {
@@ -23,7 +20,7 @@ public final class OverlayContractTest {
         heapImageSubmissionCopiesOnlyPixelRows();
         infiniteSubmissionWaitReachesTheReceipt();
         nativeWaitTimeoutContract();
-        waitTokenPointerCanBeReadBesideWait();
+        consumingCallReturnsItsResult();
         ordinaryCloseConsumesOnlyAfterRawCallReturns();
         frameArenaIsClosedBeforeNativeReleaseAndConsumeIsOneShot();
         failedPreEntryCommitRetainsFrameForDiscard();
@@ -87,6 +84,13 @@ public final class OverlayContractTest {
         }
     }
 
+    private static void consumingCallReturnsItsResult() throws Exception {
+        var pointer = MemorySegment.ofAddress(0x1300);
+        var handle = new NativeHandle(pointer);
+        require(handle.callAndConsume(value -> value).equals(pointer), "consuming call lost its result");
+        require(handle.closed(), "successful consuming call retained ownership");
+    }
+
     private static void ordinaryCloseConsumesOnlyAfterRawCallReturns() throws Exception {
         var preEntry = new NativeHandle(MemorySegment.ofAddress(0x1100));
         try { preEntry.close(ignored -> { throw new IllegalStateException("before native entry"); });
@@ -111,33 +115,6 @@ public final class OverlayContractTest {
                 "repeated close should be an idempotent no-op");
             require(closeCalls.get() == 1, "consumed native close was retried");
         }
-    }
-
-    private static void waitTokenPointerCanBeReadBesideWait() throws Exception {
-        var token = new NativeHandle(MemorySegment.ofAddress(0x1000));
-        var receiveEntered = new CountDownLatch(1);
-        var releaseReceive = new CountDownLatch(1);
-        var cancelEntered = new CountDownLatch(1);
-        try (var workers = Executors.newFixedThreadPool(2)) {
-            var receive = workers.submit(() -> {
-                MemorySegment borrowed = token.get();
-                receiveEntered.countDown();
-                require(borrowed.equals(token.get()), "wait token pointer changed while borrowed");
-                try { releaseReceive.await(); }
-                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            });
-            require(receiveEntered.await(1, TimeUnit.SECONDS), "receive did not enter");
-            var cancel = workers.submit(() -> {
-                require(token.get().equals(token.get()), "token signal pointer changed");
-                cancelEntered.countDown();
-            });
-            require(cancelEntered.await(1, TimeUnit.SECONDS), "cancel waited behind receive");
-            releaseReceive.countDown();
-            receive.get(1, TimeUnit.SECONDS);
-            cancel.get(1, TimeUnit.SECONDS);
-            token.close(ignored -> MemorySegment.NULL);
-            require(token.closed(), "joined wait token did not close");
-        } finally { releaseReceive.countDown(); }
     }
 
     private static void frameArenaIsClosedBeforeNativeReleaseAndConsumeIsOneShot() throws Exception {

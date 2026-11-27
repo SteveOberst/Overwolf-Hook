@@ -1,5 +1,4 @@
 #include <windows.h>
-#include "support/sdk.hpp"
 #include <cstring>
 #include <future>
 #include <iostream>
