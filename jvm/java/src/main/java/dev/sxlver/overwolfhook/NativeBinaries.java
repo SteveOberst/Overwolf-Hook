@@ -5,7 +5,7 @@ import java.nio.file.*;
 import java.security.*;
 import java.util.*;
 
-/** Stable content-addressed paths: capture DLLs can remain loaded in Overwolf after a session ends. */
+/** Stable content-addressed paths for the client DLL and resident runtime payload. */
 final class NativeBinaries {
     static Path directory() throws IOException {
         if (!System.getProperty("os.name").startsWith("Windows") ||
@@ -15,7 +15,7 @@ final class NativeBinaries {
         MessageDigest digest;
         try { digest = MessageDigest.getInstance("SHA-256"); }
         catch (NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
-        for (String name : List.of("owh_client.dll", "owh_capture.dll", "owh_probe.exe", "owh_info.exe")) {
+        for (String name : List.of("owh_client.dll", "owh_agent.dll")) {
             try (var stream = NativeBinaries.class.getResourceAsStream("/overwolf/native/windows-x64/" + name)) {
                 if (stream == null) throw new IOException("Missing bundled native binary: " + name);
                 byte[] bytes = stream.readAllBytes();

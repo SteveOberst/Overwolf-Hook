@@ -1,21 +1,34 @@
-/build/
-/out/
-/CMakeUserPresets.json
-/.vs/
-/.idea/
+# Build output and local tool caches, including standalone starter projects.
+build/
+cmake-build-*/
+out/
+/site/
+/.cache/
+/.venv-docs/
+/output/
+/.workspace/
+CMakeUserPresets.json
+.vs/
+.idea/
 __pycache__/
+*.pyc
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
 *.bin
 *.dll
 *.exe
 *.lib
+*.obj
+*.class
 *.pdb
 *.exp
 *.log
 *.jsonl
-/examples/kotlin/.gradle/
-/examples/kotlin/.kotlin/
-/examples/kotlin/build/
+.gradle/
+.kotlin/
 
-/jvm/kotlin/.gradle/
-/jvm/kotlin/.kotlin/
-/jvm/kotlin/build/
+# Generated website downloads; authored docs remain the direct Zensical input.
+/docs/downloads/
+/docs/assets/generated/
+/docs/build-info.json

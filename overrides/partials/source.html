@@ -1,0 +1,10 @@
+{# Use a regular link, without the source component that fetches repository stats. #}
+<a href="{{ config.repo_url | e }}"
+   class="md-header__button md-icon"
+   title="View repository on GitHub"
+   aria-label="View repository on GitHub">
+  <span aria-hidden="true">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/github" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </span>
+</a>

@@ -1,40 +1,25 @@
-plugins {
-    kotlin("jvm") version "2.4.0"
-    `java-library`
-    `ivy-publish`
-}
-group = "dev.sxlver.native"
-version = file("../../version.txt").readText().trim()
-kotlin { jvmToolchain(25) }
+import org.gradle.api.publish.ivy.IvyPublication
+
+plugins { `java-library`; alias(libs.plugins.kotlin.jvm); `ivy-publish` }
+base { archivesName.set("${rootProject.name}-kotlin") }
+kotlin { jvmToolchain(libs.versions.java.get().toInt()) }
 dependencies {
-    api("dev.sxlver.native:overwolf-hook:$version:windows-x64@jar")
-    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-    testImplementation(kotlin("test-junit5"))
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
+    api(project(":java"))
+    api(libs.coroutines)
+    testImplementation(libs.kotlin.test)
+    testRuntimeOnly(libs.junit.engine)
+    testRuntimeOnly(libs.junit.launcher)
 }
 tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED")
-    providers.gradleProperty("owhCaptureDll").orNull?.let { systemProperty("owhCaptureDll", it) }
 }
 tasks.jar {
-    from(files("../../LICENSE", "../../THIRD_PARTY_NOTICES.md")) { into("META-INF/overwolf-hook") }
-}
-// GitHub assets have an Ivy descriptor so consumers receive SDK/coroutine dependencies automatically.
-publishing {
-    publications {
-        create<IvyPublication>("sdk") { from(components["java"]) }
-    }
-    repositories {
-        ivy {
-            name = "staging"
-            url = layout.buildDirectory.dir("repository").get().asFile.toURI()
-            patternLayout {
-                artifact("v[revision]/[artifact]-[revision](-[classifier]).[ext]")
-                ivy("v[revision]/[module]-[revision].ivy.xml")
-            }
-        }
+    from(listOf("LICENSE", "THIRD_PARTY_NOTICES.md").map { rootProject.file("../$it") }) {
+        into("META-INF/overwolf-hook")
     }
 }
-tasks.withType<GenerateModuleMetadata>().configureEach { enabled = false }
+publishing.publications.create<IvyPublication>("kotlinApi") {
+    module = base.archivesName.get()
+    from(components["java"])
+}

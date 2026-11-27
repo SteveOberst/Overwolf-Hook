@@ -17,6 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         configuration: [Debug, Release]
+    env:
+      NATIVE_DIRECTORY: ${{ github.workspace }}/build/ci/native/${{ matrix.configuration }}
+      JVM_BUILD: ${{ github.workspace }}/build/ci/jvm/${{ matrix.configuration }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -27,39 +30,63 @@ jobs:
         run: python --version
       - name: Configure
         shell: pwsh
-        run: >-
-          cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64
-          -DBUILD_TESTING=ON -DOWH_HOOK_TESTS=ON -DOWH_FFM_TESTS=ON -DOWH_JVM_BINDINGS=ON
-          "-DJava_JAVA_EXECUTABLE=$env:JAVA_HOME/bin/java.exe"
+        run: |
+          cmake --preset windows-x64 -B build/ci "-DOWH_BUILD_NUMBER=$env:GITHUB_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify architecture and configured product links
+        run: python tests/architecture_tests.py --build-dir build/ci
       - name: Build
         run: cmake --build build/ci --config ${{ matrix.configuration }}
       - name: Test
         run: ctest --test-dir build/ci -C ${{ matrix.configuration }} --output-on-failure --output-junit test-results.xml
-      - name: Compile the Kotlin examples against the actual JVM artifact
+      - name: Build and test JVM artifacts
+        shell: pwsh
+        run: |
+          $jvmBuild = $env:JVM_BUILD
+          ./jvm/gradlew.bat -p jvm check assemble publish --project-cache-dir "$jvmBuild/.gradle" "-PowhBuildDirectory=$jvmBuild" "-PnativeDirectory=$env:NATIVE_DIRECTORY" --no-daemon
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify direct Java FFM consumers
+        shell: pwsh
+        run: |
+          $native = $env:NATIVE_DIRECTORY
+          $env:PATH = "$native;$env:PATH"
+          $fixture = "$PWD/build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe"
+          & $fixture jvm "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/ffm/java/FfmStateRead.java" "$native/owh_client.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $fixture jvm "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/ffm/java/FfmChannels.java" "$native/owh_client.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:JAVA_HOME/bin/java.exe" --enable-native-access=ALL-UNNAMED "$PWD/tests/ffm/java/FfmRoundtrip.java" "$native/owh_client.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify external JVM artifact consumers
         shell: pwsh
         run: |
           $version = (Get-Content version.txt).Trim()
-          $jar = "$PWD/build/ci/jvm/java/${{ matrix.configuration }}/overwolf-hook-$version-windows-x64.jar"
-          $repository = "$PWD/build/kotlin-test-repository"
-          $release = New-Item -ItemType Directory -Force -Path "$repository/v$version"
-          Copy-Item -LiteralPath $jar -Destination $release.FullName
-          ./examples/kotlin/gradlew.bat -p jvm/kotlin check publish "-I$PWD/tests/kotlin_source_build.init.gradle" "-DoverwolfHookTestRepository=$repository" "-PowhCaptureDll=$PWD/build/ci/${{ matrix.configuration }}/owh_capture.dll" --no-daemon
+          $jvmBuild = $env:JVM_BUILD
+          $jar = "$jvmBuild/java/libs/overwolf-hook-$version-windows-x64.jar"
+          $repository = "$jvmBuild/repository"
+          ./jvm/gradlew.bat -p tests/consumers/kotlin installDist "-PsdkVersion=$version" "-PsdkRepository=$repository" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-ChildItem "jvm/kotlin/build/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination $release.FullName
-          ./examples/kotlin/gradlew.bat -p examples/kotlin installDist "-PoverwolfHookVersion=$version" "-I$PWD/tests/kotlin_source_build.init.gradle" "-DoverwolfHookTestRepository=$repository" --no-daemon
+          ./jvm/gradlew.bat -p tests/consumers/java installDist "-PsdkVersion=$version" "-PsdkRepository=$repository" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/examples/kotlin/build/install/overwolf-hook-kotlin-example/lib/*" ReadStateKt
+          $env:PATH = "$env:NATIVE_DIRECTORY;$env:PATH"
+          ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/consumers/kotlin/build/install/owh-kotlin-consumer-fixture/lib/*" ConsumerSmokeKt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/ci/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$PWD/build/ci/jvm/java/${{ matrix.configuration }}/test-classes" ReadState
+          ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/consumers/java/build/install/owh-java-consumer-fixture/lib/*" ConsumerSmoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Compile the installed C example
+          ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$jvmBuild/java/classes/java/test"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify installed Native SDK consumers
         shell: pwsh
         run: |
           cmake --install build/ci --config ${{ matrix.configuration }} --prefix out/install
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake -S examples/c -B build/example -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$PWD/out/install"
+          python tests/package_tests.py out/install
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build/example --config ${{ matrix.configuration }}
+          cmake -S tests/consumers/native -B build/consumer -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$PWD/out/install"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/consumer --config ${{ matrix.configuration }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build/consumer -C ${{ matrix.configuration }} --output-on-failure
       - name: Package
         if: matrix.configuration == 'Release'
         shell: pwsh
@@ -68,14 +95,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $zip = Get-ChildItem out/packages -Filter '*.zip'
           if (@($zip).Count -ne 1) { throw 'Expected exactly one package' }
-          Copy-Item build/ci/jvm/java/Release/*.jar out/packages/
           $version = (Get-Content version.txt).Trim()
-          Get-ChildItem "jvm/kotlin/build/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination out/packages/
+          Get-ChildItem "$env:JVM_BUILD/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination out/packages/
           $lines = Get-ChildItem out/packages -File | Where-Object { $_.Extension -in '.zip', '.jar', '.xml' } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           }
           Set-Content -LiteralPath out/packages/SHA256SUMS -Value $lines -Encoding ascii
+      - name: Compile published documentation examples
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          python tools/docs/smoke.py --sdk-dir out/install --ivy-repository "$env:JVM_BUILD/repository" --work-dir build/docs-smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.configuration == 'Release'
         with:
@@ -92,5 +124,6 @@ jobs:
           name: tests-${{ matrix.configuration }}
           path: |
             build/ci/test-results.xml
-            jvm/kotlin/build/test-results/test/*.xml
+            build/ci/jvm/${{ matrix.configuration }}/*/test-results/test/*.xml
+            build/docs-smoke/report.json
           if-no-files-found: warn

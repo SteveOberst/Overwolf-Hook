@@ -1,0 +1,5 @@
+add_library(owh_agent_fixture STATIC ${agent_core_sources})
+owh_configure_agent_implementation(owh_agent_fixture owh_overwolf_fixture)
+target_compile_definitions(owh_agent_fixture PUBLIC OWH_ADMISSION_TEST_FIXTURE)
+target_include_directories(owh_agent_fixture PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set_target_properties(owh_agent_fixture PROPERTIES FOLDER Tests/Fixtures)

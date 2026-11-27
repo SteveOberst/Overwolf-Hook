@@ -1,0 +1,5 @@
+// Method identity, C++ method name, wire ID, request, response.
+OWH_METHOD(SubscribeEvents, subscribe, 8, SubscribeEventsRequest, SubscribeEventsResponse)
+OWH_METHOD(GetEventStatistics, statistics, 9, SourceRequest, EventStatisticsResponse)
+OWH_METHOD(UnsubscribeEvents, close, 10, SourceRequest, ResultResponse)
+OWH_METHOD(GetEventCapabilities, capabilities, 13, Empty, EventCapabilitiesResponse)

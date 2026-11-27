@@ -1,0 +1,6 @@
+#pragma once
+#include <overwolf_hook/types/build_info.h>
+
+namespace overwolf_hook::build_info {
+inline constexpr owh_build_info value = {"@OWH_VERSION@", UINT64_C(@OWH_BUILD_NUMBER@)};
+} // namespace overwolf_hook::build_info

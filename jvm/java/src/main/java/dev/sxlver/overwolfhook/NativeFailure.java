@@ -1,27 +1,21 @@
 package dev.sxlver.overwolfhook;
 
+import dev.sxlver.overwolfhook.model.Result;
 import java.io.IOException;
-import java.lang.foreign.MemorySegment;
-import dev.sxlver.overwolfhook.bindings.owh_result;
-import static dev.sxlver.overwolfhook.bindings.OverwolfNative.OWH_OK;
 
-/** Failed native operation. Status and the original unsigned Win32 error are retained. */
+/** Native failure retaining the generated result value, including unknown codes. */
 public final class NativeFailure extends IOException {
-    private final int status;
-    private final long nativeError;
-
-    NativeFailure(String operation, int status, long nativeError) {
-        super(operation + ": status=" + status + ", Win32=" + nativeError);
-        this.status = status;
-        this.nativeError = nativeError;
+    private final String operation;
+    private final Result result;
+    public NativeFailure(String operation, Result result) {
+        super(operation + ": status=" + Integer.toUnsignedString(result.getStatus()) +
+            ", stage=" + Long.toUnsignedString(result.getFailureStage()) +
+            ", domain=" + Long.toUnsignedString(result.getErrorDomain()) +
+            ", nativeCode=0x" + Long.toUnsignedString(result.getNativeCode(), 16));
+        this.operation = operation;
+        this.result = result;
     }
-
-    public int status() { return status; }
-    public long nativeError() { return nativeError; }
-
-    static void check(String operation, MemorySegment result) throws NativeFailure {
-        int status = owh_result.status(result);
-        if (status != OWH_OK())
-            throw new NativeFailure(operation, status, Integer.toUnsignedLong(owh_result.native_error(result)));
-    }
+    public String operation() { return operation; }
+    public Result result() { return result; }
+    public int statusCode() { return result.getStatus(); }
 }

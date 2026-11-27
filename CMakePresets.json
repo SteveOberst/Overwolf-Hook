@@ -1,21 +1,71 @@
 {
   "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
-      "name": "windows-x64",
-      "displayName": "Windows x64 (Visual Studio 2026)",
-      "generator": "Visual Studio 18 2026",
+      "name": "windows-base",
+      "hidden": true,
       "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/windows-x64",
-      "cacheVariables": { "BUILD_TESTING": "ON", "OWH_HOOK_TESTS": "ON" }
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "OWH_BUILD_TOOLS": "ON",
+        "OWH_HOOK_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-x64",
+      "inherits": "windows-base",
+      "displayName": "Windows x64 (Visual Studio 2022)",
+      "generator": "Visual Studio 17 2022"
+    },
+    {
+      "name": "windows-x64-vs2026",
+      "inherits": "windows-base",
+      "displayName": "Windows x64 (Visual Studio 2026; CMake >= 4.2)",
+      "generator": "Visual Studio 18 2026"
+    },
+    {
+      "name": "windows-x64-sdk",
+      "inherits": "windows-x64",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF",
+        "OWH_BUILD_TOOLS": "OFF"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "windows-x64", "configuration": "Debug" },
-    { "name": "release", "configurePreset": "windows-x64", "configuration": "Release" }
+    {
+      "name": "debug",
+      "configurePreset": "windows-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "windows-x64",
+      "configuration": "Release"
+    }
   ],
   "testPresets": [
-    { "name": "debug", "configurePreset": "windows-x64", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "windows-x64", "configuration": "Release", "output": { "outputOnFailure": true } }
+    {
+      "name": "debug",
+      "configurePreset": "windows-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "windows-x64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }

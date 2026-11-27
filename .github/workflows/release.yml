@@ -21,6 +21,9 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     permissions:
       contents: write
       pull-requests: write
@@ -31,8 +34,8 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # GITHUB_TOKEN-created PRs do not trigger pull_request workflows. Explicit
-      # dispatch starts ordinary read-only CI without a PAT or pull_request_target.
+      # Explicit dispatch validates token-created PRs without depending on a
+      # separate PR-workflow approval, a PAT, or pull_request_target.
       - name: Test the release PR
         if: steps.release.outputs.prs_created == 'true'
         shell: pwsh
@@ -60,6 +63,8 @@ jobs:
           set -euo pipefail
           release_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
           test "$release_sha" = "$VERIFIED_SHA"
+          release_version=$(gh api "repos/$GITHUB_REPOSITORY/contents/version.txt?ref=$RELEASE_TAG" --jq .content | base64 -d | tr -d '\r\n')
+          test "$release_version" = "${RELEASE_TAG#v}"
           test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.zip"
           test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.jar"
           test -f "out/packages/overwolf-hook-kotlin-${RELEASE_TAG#v}.jar"
@@ -67,3 +72,15 @@ jobs:
           cd out/packages
           sha256sum --check SHA256SUMS
           gh release upload "$RELEASE_TAG" ./*.zip ./*.jar ./*.ivy.xml SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
+  documentation:
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      source_ref: ${{ needs.release.outputs.tag_name }}
+      release_tag: ${{ needs.release.outputs.tag_name }}
