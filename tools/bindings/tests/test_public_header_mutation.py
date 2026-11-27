@@ -1,21 +1,17 @@
 """Mutate one canonical C field and check C++, jextract, Java, and Kotlin consumers."""
 from pathlib import Path
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 import unittest
-import xml.etree.ElementTree as ET
 
 from tools.bindings.ast import parse
 from tools.bindings.generate import generate_models
+from tools.bindings.tests.toolchain import java_tools, kotlin_classpath, tool_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-JEXTRACT_ROOT = (Path(os.environ["OWH_JEXTRACT_RUNTIME"]).parent
-                 if os.environ.get("OWH_JEXTRACT_RUNTIME")
-                 else ROOT / "jvm/build/generated/sources/toolchain/jextract-25")
 EVENTS_HEADER = ROOT / "include/overwolf_hook/types/events.h"
 MUTATION_FIELD = "generation_probe"
 OLD_FIELD = "    uint64_t process_started, session_id;"
@@ -33,89 +29,6 @@ def mutate_event_header(work: Path) -> tuple[Path, Path]:
     mutated.write_text(original.replace(OLD_FIELD, OLD_FIELD + f"\n    uint32_t {MUTATION_FIELD};")
                         .replace(OLD_SIZE, NEW_SIZE), encoding="utf-8")
     return work / "include", mutated
-
-
-def jdk_25():
-    candidates = []
-    for variable in ("JAVA_HOME", "JDK_HOME"):
-        if os.environ.get(variable):
-            candidates.append(Path(os.environ[variable]))
-    candidates.extend(Path("C:/Program Files/Java").glob("jdk-25*"))
-    candidates.extend(Path.home().glob(".jdks/openjdk-25*"))
-    for home in candidates:
-        javac, java = home / "bin/javac.exe", home / "bin/java.exe"
-        if not javac.is_file() or not java.is_file():
-            continue
-        try:
-            version = subprocess.run([str(javac), "--version"], capture_output=True,
-                                     text=True, timeout=5, check=True).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if "javac 25" in version:
-            return javac, java
-    return None
-
-
-def kotlin_version() -> str:
-    build = (ROOT / "jvm/build.gradle.kts").read_text(encoding="utf-8")
-    match = re.search(r'kotlin\("jvm"\)\s+version\s+"([^"]+)"', build)
-    if not match:
-        raise AssertionError("could not read Kotlin JVM plugin version from jvm/build.gradle.kts")
-    return match.group(1)
-
-
-def gradle_artifact(group: str, artifact: str, version: str) -> Path | None:
-    # Gradle caches the dotted Maven group as a literal directory name.
-    base = Path.home() / ".gradle/caches/modules-2/files-2.1" / group / artifact / version
-    if not base.is_dir():
-        return None
-    return next((path for path in base.glob("*/*.jar")
-                 if not path.name.endswith(("-sources.jar", "-javadoc.jar"))), None)
-
-
-def kotlin_compiler_classpath(version: str) -> tuple[Path, ...] | None:
-    # Gradle resolves the compiler's runtime dependencies, including kotlin-reflect.
-    # Cache/POM probing remains useful when running this test outside Gradle.
-    if configured := os.environ.get("OWH_KOTLIN_COMPILER_CLASSPATH"):
-        jars = tuple(Path(item) for item in configured.split(os.pathsep))
-        stdlib = next((path for path in jars if path.name.startswith("kotlin-stdlib-")), None)
-        if not stdlib or not all(path.is_file() for path in jars):
-            raise AssertionError("incomplete Gradle Kotlin compiler classpath")
-        return stdlib, *(path for path in jars if path != stdlib)
-    compiler = gradle_artifact("org.jetbrains.kotlin", "kotlin-compiler-embeddable", version)
-    stdlib = gradle_artifact("org.jetbrains.kotlin", "kotlin-stdlib", version)
-    if not compiler or not stdlib:
-        return None
-    jars = {compiler, stdlib}
-    queue = [("org.jetbrains.kotlin", "kotlin-compiler-embeddable", version)]
-    visited = set()
-    namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
-    while queue:
-        group, artifact, current_version = queue.pop()
-        identity = (group, artifact, current_version)
-        if identity in visited:
-            continue
-        visited.add(identity)
-        base = Path.home() / ".gradle/caches/modules-2/files-2.1" / group / artifact / current_version
-        pom = next(base.glob("*/*.pom"), None) if base.is_dir() else None
-        if not pom:
-            continue
-        document = ET.parse(pom).getroot()
-        for dependency in document.findall("m:dependencies/m:dependency", namespace):
-            scope = dependency.findtext("m:scope", default="compile", namespaces=namespace)
-            optional = dependency.findtext("m:optional", default="false", namespaces=namespace)
-            if scope not in {"compile", "runtime"} or optional == "true":
-                continue
-            dep_group = dependency.findtext("m:groupId", namespaces=namespace)
-            dep_artifact = dependency.findtext("m:artifactId", namespaces=namespace)
-            dep_version = dependency.findtext("m:version", namespaces=namespace)
-            if not dep_group or not dep_artifact or not dep_version or "${" in dep_version:
-                continue
-            jar = gradle_artifact(dep_group, dep_artifact, dep_version)
-            if jar:
-                jars.add(jar)
-                queue.append((dep_group, dep_artifact, dep_version))
-    return stdlib, compiler, *sorted(jars - {stdlib, compiler})
 
 
 def find_vcvars64() -> Path | None:
@@ -164,12 +77,9 @@ int main() {
             self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
 
     def prepare_mutated_java(self, work: Path):
-        toolchain = jdk_25()
-        jextract = JEXTRACT_ROOT / "bin/jextract.bat"
-        runtime = JEXTRACT_ROOT / "runtime"
-        if not (toolchain and jextract.is_file() and (runtime / "bin/libclang.dll").is_file()):
-            self.skipTest("pinned jextract and Java 25 toolchain are not installed")
-        javac, java = toolchain
+        javac, java = java_tools()
+        runtime = tool_path("OWH_JEXTRACT_RUNTIME")
+        jextract = runtime.parent / "bin/jextract.bat"
         include, mutated = mutate_event_header(work)
         ast = parse(ROOT, [mutated], runtime)
         ast["records"] = {name: ast["records"][name]
@@ -224,11 +134,7 @@ public final class MutationProbe {
             self.assertIn("PASS mutated canonical header reaches Java model", executed.stdout)
 
     def test_kotlin_synthetic_property_follows_mutated_header(self):
-        version = kotlin_version()
-        toolchain = jdk_25()
-        compiler_classpath = kotlin_compiler_classpath(version)
-        if not toolchain or not compiler_classpath:
-            self.skipTest(f"JDK 25 and cached Kotlin compiler {version} are required for this subtest")
+        compiler_classpath = kotlin_classpath()
         with tempfile.TemporaryDirectory(prefix="owh-header-mutation-kotlin-") as temporary:
             work = Path(temporary)
             java, classes, _, _ = self.prepare_mutated_java(work)

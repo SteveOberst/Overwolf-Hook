@@ -37,6 +37,28 @@ def publish_generated(generated: Path, output: Path, temporary: Path):
         raise
 
 
+def prepare_jextract(config: dict, cache: Path) -> Path:
+    """Cache the complete pinned archive by digest, publishing only after extraction."""
+    cache = cache.resolve()
+    cache.mkdir(parents=True, exist_ok=True)
+    destination = cache / config["sha256"]
+    executable = Path(config["directory"]) / "bin/jextract.bat"
+    if not (destination / executable).is_file():
+        with tempfile.TemporaryDirectory(prefix="jextract-", dir=cache) as scratch:
+            temporary = Path(scratch)
+            archive = temporary / "jextract.tar.gz"
+            urllib.request.urlretrieve(config["url"], archive)
+            if hashlib.sha256(archive.read_bytes()).hexdigest() != config["sha256"]:
+                raise RuntimeError("jextract checksum mismatch")
+            extracted = temporary / "extracted"
+            with tarfile.open(archive) as package:
+                package.extractall(extracted, filter="data")
+            if not (extracted / executable).is_file():
+                raise RuntimeError("jextract archive does not contain its configured executable")
+            extracted.rename(destination)
+    return destination / executable
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -49,16 +71,7 @@ def main():
     generator = args.jextract
     if generator is None:
         config = json.loads((tools / "jextract.json").read_text())
-        cache = output.parent / "toolchain"
-        cache.mkdir(exist_ok=True)
-        generator = cache / "jextract-25/bin/jextract.bat"
-        if not generator.exists():
-            archive = cache / "jextract.tar.gz"
-            urllib.request.urlretrieve(config["url"], archive)
-            if hashlib.sha256(archive.read_bytes()).hexdigest() != config["sha256"]:
-                raise RuntimeError("jextract checksum mismatch")
-            with tarfile.open(archive) as package:
-                package.extractall(cache, filter="data")
+        generator = prepare_jextract(config, output.parent / "toolchain")
     include = root / "include"
     headers = [include / "overwolf_hook" / name for name in
                (root / "cmake/public-headers.txt").read_text(encoding="utf-8").splitlines() if name]

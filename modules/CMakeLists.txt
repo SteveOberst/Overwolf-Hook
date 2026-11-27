@@ -39,17 +39,6 @@ target_sources(owh_cpp INTERFACE FILE_SET cpp_headers TYPE HEADERS
 install(TARGETS owh_abi owh_cpp EXPORT OverwolfHookTargets
     FILE_SET cpp_headers DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# The payload is explicitly deployed with the Client; it is not a link
-# dependency of the Client. Both files have one configuration-specific staging
-# owner so parallel tools/tests never race while copying the same DLL.
-set(OWH_NATIVE_STAGE "${PROJECT_BINARY_DIR}/native/$<CONFIG>" CACHE INTERNAL "Matching native DLL staging")
-add_custom_command(
-    OUTPUT "${OWH_NATIVE_STAGE}/owh_client.dll" "${OWH_NATIVE_STAGE}/owh_agent.dll"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${OWH_NATIVE_STAGE}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:owh_client>" "${OWH_NATIVE_STAGE}/owh_client.dll"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:owh_agent>" "${OWH_NATIVE_STAGE}/owh_agent.dll"
-    DEPENDS owh_client owh_agent
-    VERBATIM)
-add_custom_target(owh_native_bundle ALL DEPENDS
-    "${OWH_NATIVE_STAGE}/owh_client.dll" "${OWH_NATIVE_STAGE}/owh_agent.dll")
-set_target_properties(owh_native_bundle PROPERTIES FOLDER Native)
+# Each product DLL is linked directly into its configuration's runtime directory.
+set_target_properties(owh_client owh_agent PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${OWH_NATIVE_DIRECTORY}")

@@ -11,11 +11,6 @@ foreach(language IN ITEMS c cpp)
     else()
         target_link_libraries(consumer_${language} PRIVATE OverwolfHook::Client)
     endif()
-    add_custom_command(TARGET consumer_${language} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:OverwolfHook::Client>
-            $<TARGET_FILE:OverwolfHook::Agent>
-            $<TARGET_FILE_DIR:consumer_${language}>
-        VERBATIM)
+    overwolf_hook_deploy_runtime(consumer_${language})
     add_test(NAME sdk_consumer.${language} COMMAND consumer_${language})
 endforeach()

@@ -27,6 +27,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 include(MinHook)
 include(BoostInterprocess)
+set(OWH_NATIVE_DIRECTORY "${PROJECT_BINARY_DIR}/native/$<CONFIG>")
 add_subdirectory(modules)
 if(OWH_BUILD_TOOLS)
     add_subdirectory(tools)

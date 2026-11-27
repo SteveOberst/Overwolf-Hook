@@ -25,9 +25,11 @@ class CXToken(C.Structure):
 
 
 def load_api(root: Path, runtime: Path | None = None):
-    runtime = runtime or (Path(os.environ["OWH_JEXTRACT_RUNTIME"])
-                          if "OWH_JEXTRACT_RUNTIME" in os.environ else
-                          root / "jvm/build/generated/sources/toolchain/jextract-25/runtime")
+    if runtime is None:
+        configured = os.environ.get("OWH_JEXTRACT_RUNTIME")
+        if not configured:
+            raise RuntimeError("Pass the jextract runtime path or run generation/tests through Gradle")
+        runtime = Path(configured)
     dll_dir = runtime / "bin"
     dll = dll_dir / "libclang.dll"
     if not dll.is_file():
@@ -96,13 +98,11 @@ def annotation(api, cursor) -> str:
 
 def parse(root: Path, headers: list[Path], runtime: Path | None = None) -> dict:
     api, runtime = load_api(root, runtime)
-    scratch = root / "jvm/build/generated/sources"
-    scratch.mkdir(parents=True, exist_ok=True)
     options = ["-x", "c", "-std=c17", "-target", "x86_64-pc-windows-msvc",
                "-I" + str(root / "include"), "-isystem", str(runtime / "conf/jextract")]
     argv = (C.c_char_p * len(options))(*(x.encode() for x in options))
     idx = api["create_index"](0, 0)
-    with tempfile.TemporaryDirectory(prefix="owh-ast-", dir=scratch) as directory:
+    with tempfile.TemporaryDirectory(prefix="owh-ast-") as directory:
         translation = Path(directory) / "types.c"
         translation.write_text("\n".join(f'#include "{h.resolve().as_posix()}"' for h in headers), encoding="utf-8")
         tu = api["parse"](idx, str(translation).encode(), argv, len(options), None, 0, 0)

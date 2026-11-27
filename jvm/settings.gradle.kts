@@ -5,3 +5,5 @@ dependencyResolutionManagement {
     repositories { mavenCentral() }
 }
 rootProject.name = "overwolf-hook"
+
+include("java", "kotlin")

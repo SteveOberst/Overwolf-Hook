@@ -7,46 +7,16 @@ import os
 
 from tools.bindings.ast import parse
 from tools.bindings.generate import generate_models
+from tools.bindings.tests.toolchain import java_tools, tool_path
 
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "nested_owned.h"
-TOOLCHAIN = (Path(os.environ["OWH_JEXTRACT_RUNTIME"]).parent
-             if os.environ.get("OWH_JEXTRACT_RUNTIME")
-             else ROOT / "jvm/build/generated/sources/toolchain/jextract-25")
-
-
-def jdk_25():
-    candidates = []
-    for variable in ("JAVA_HOME", "JDK_HOME"):
-        if os.environ.get(variable):
-            candidates.append(Path(os.environ[variable]))
-    candidates.extend(Path("C:/Program Files/Java").glob("jdk-25*"))
-    candidates.extend(Path.home().glob(".jdks/openjdk-25*"))
-    candidates.extend(Path.home().glob(".gradle/jdks/*"))
-    for home in candidates:
-        javac = home / "bin/javac.exe"
-        java = home / "bin/java.exe"
-        if not javac.is_file() or not java.is_file():
-            continue
-        try:
-            version = subprocess.run([str(javac), "--version"], capture_output=True,
-                                     text=True, timeout=5, check=True).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if "javac 25" in version:
-            return javac, java
-    return None
-
-
 class NestedCopyRuntimeTest(unittest.TestCase):
     def test_jextract_compiled_models_own_recursive_spans_after_source_arena_closes(self):
-        jextract = TOOLCHAIN / "bin/jextract.bat"
-        compiler = jdk_25()
-        runtime = TOOLCHAIN / "runtime"
-        if not (jextract.is_file() and compiler and (runtime / "bin/libclang.dll").is_file()):
-            self.skipTest("pinned jextract and Java 25 toolchain are not installed")
-        javac, java = compiler
+        runtime = tool_path("OWH_JEXTRACT_RUNTIME")
+        jextract = runtime.parent / "bin/jextract.bat"
+        javac, java = java_tools()
 
         ast = parse(ROOT, [FIXTURE], runtime)
         with tempfile.TemporaryDirectory(prefix="owh-nested-copy-") as temporary:

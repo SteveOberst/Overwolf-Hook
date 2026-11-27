@@ -49,7 +49,7 @@ translate the configuration to that syntax; the SDK does not require Kotlin DSL.
     configuration. `find_package` then makes its targets available. This does not
     build the library from source or change your application's compiler settings.
 
-    Link your executable and copy the two library DLLs beside it. Replace `my_app`
+    Link your executable and deploy the library DLLs with the SDK's CMake helper. Replace `my_app`
     with your existing executable target. For a C++ target, keep your C++ standard
     setting instead of the `c_std_17` line:
 
@@ -58,6 +58,8 @@ translate the configuration to that syntax; the SDK does not require Kotlin DSL.
     ```
 
     Keep both DLLs from the same release together when distributing your application.
+    `overwolf_hook_deploy_runtime` copies the matching pair beside your executable
+    after the build.
     The client DLL runs in your application; the other DLL provides its integration
     inside Overwolf when you use overlays or event capture.
 
@@ -78,12 +80,7 @@ translate the configuration to that syntax; the SDK does not require Kotlin DSL.
     add_executable(my_app main.cpp)
     target_compile_features(my_app PRIVATE cxx_std_20)
     target_link_libraries(my_app PRIVATE OverwolfHook::Cpp)
-    add_custom_command(TARGET my_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:OverwolfHook::Client>"
-            "$<TARGET_FILE:OverwolfHook::Agent>"
-            "$<TARGET_FILE_DIR:my_app>"
-        VERBATIM)
+    overwolf_hook_deploy_runtime(my_app)
     ```
 
     `OverwolfHook::Cpp` supplies the resource-owning C++ facade and links the Client.

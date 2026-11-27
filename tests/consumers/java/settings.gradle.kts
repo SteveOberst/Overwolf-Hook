@@ -7,7 +7,7 @@ dependencyResolutionManagement {
                     name = "sdkUnderTest"
                     url = uri(providers.gradleProperty("sdkRepository").get())
                     patternLayout {
-                        artifact("v[revision]/[artifact]-[revision]-abi(-[classifier]).[ext]")
+                        artifact("v[revision]/[artifact]-[revision](-[classifier]).[ext]")
                         ivy("v[revision]/[module]-[revision].ivy.xml")
                     }
                     metadataSources { ivyDescriptor(); artifact() }

@@ -65,8 +65,8 @@ jobs:
           test "$release_sha" = "$VERIFIED_SHA"
           release_version=$(gh api "repos/$GITHUB_REPOSITORY/contents/version.txt?ref=$RELEASE_TAG" --jq .content | base64 -d | tr -d '\r\n')
           test "$release_version" = "${RELEASE_TAG#v}"
-          test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-abi-windows-x64.zip"
-          test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-abi-windows-x64.jar"
+          test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.zip"
+          test -f "out/packages/overwolf-hook-${RELEASE_TAG#v}-windows-x64.jar"
           test -f "out/packages/overwolf-hook-kotlin-${RELEASE_TAG#v}.jar"
           test -f "out/packages/overwolf-hook-kotlin-${RELEASE_TAG#v}.ivy.xml"
           cd out/packages

@@ -135,7 +135,7 @@ ALLOWED_PRODUCT_LINKS = {
     "platform": {"core"},
     "ipc": {"core", "platform"},
     "overwolf": {"core", "platform", "overwolf"},
-    "client": {"core", "platform", "ipc", "overwolf"},
+    "client": {"core", "platform", "ipc", "overwolf", "client"},
     "agent": {"core", "platform", "ipc", "overwolf", "agent"},
 }
 
@@ -150,6 +150,7 @@ def target_module(name):
         "owh_overwolf_active": "overwolf",
         "owh_overwolf_fixture": "overwolf",
         "owh_client": "client",
+        "owh_client_objects": "client",
         "owh_client_fixture": "client",
         "owh_agent_core": "agent",
         "owh_agent": "agent",

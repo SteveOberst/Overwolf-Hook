@@ -21,19 +21,43 @@ extra method from a temporary catalog to verify the generated proxy and router.
 
 The `windows-x64` preset uses Visual Studio 2022. Visual Studio 2026 uses `windows-x64-vs2026` and CMake 4.2+. Keep local paths in ignored `CMakeUserPresets.json`.
 
+The Client and Agent DLLs link directly into `build/native/CONFIGURATION`. Tests
+declare their own build dependencies; building one test target does not build the
+whole SDK. The Client's common sources compile once in `owh_client_objects`;
+production and fixture variants compile only their Overwolf control implementation
+separately. Agent fixtures remain separate because their compile definitions affect
+type layouts.
+
 ## JVM bindings
 
-`jvm` is one Gradle project. Java is the core API; the optional Kotlin artifact extends its resource model. CMake builds Native only; Gradle owns binding generation, compilation, tests and JVM publication. Set `JAVA_HOME` to JDK 25, build the matching native pair first, then run:
+`jvm` is a Gradle root with `:java` and `:kotlin` subprojects. Java owns the JDK-only
+core API, generated bindings, and bundled native pair. Kotlin depends on Java and
+adds its language facade and coroutine support. CMake builds native code; Gradle
+owns binding generation, compilation, tests, and JVM publication. Set `JAVA_HOME`
+to JDK 25, build the matching native pair first, then run:
 
 ```powershell
 ./jvm/gradlew.bat -p jvm check assemble "-PnativeDirectory=$PWD/build/native/Debug" --no-daemon
 ```
 
-Generated FFM bindings are build outputs: edit public C headers or handwritten APIs and regenerate through Gradle. `publish` stages the JVM artifacts in `jvm/build/repository`. CI runs raw Java FFM fixtures and external Java/Kotlin consumers after both builds; these checks do not belong to the CMake dependency graph.
+Generated FFM bindings are build outputs: edit public C headers or handwritten APIs
+and regenerate through Gradle. The language subprojects write to `jvm/build/java`
+and `jvm/build/kotlin`. Use `-PowhBuildDirectory=PATH` to relocate the complete JVM
+build. `publish` stages both components and their Ivy dependency metadata under
+`jvm/build/repository/vVERSION`. Artifact names are `overwolf-hook-VERSION-windows-x64.jar`
+and `overwolf-hook-kotlin-VERSION.jar`; `VERSION` comes from `version.txt`.
+CI runs raw Java FFM fixtures and external Java/Kotlin consumers after both builds;
+these checks do not belong to the CMake dependency graph.
 
 `gradlew check` verifies handle lifetimes, packaged artifacts, and model generation
 from the native declarations. It also checks that new model fields propagate and
 that pointer fields require explicit ownership metadata.
+
+Gradle supplies the Java compiler, Java launcher, Kotlin compiler classpath, and
+jextract runtime to the Python binding tests. Run them through `:java:bindingModelsTest`
+or `check`; they do not discover toolchains independently. The pinned jextract
+archive is cached by SHA-256, so changing `jvm/tools/jextract.json` selects a new
+cache entry. Set `-Pjextract=PATH_TO_JEXTRACT_BAT` to use an explicit local toolchain.
 
 ## Internal diagnostic tools
 

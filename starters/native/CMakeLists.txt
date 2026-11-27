@@ -8,7 +8,7 @@ if(NOT OverwolfHook_FOUND)
     endif()
     include(FetchContent)
     FetchContent_Declare(overwolf_hook_sdk
-        URL "https://github.com/SteveOberst/Overwolf-Hook/releases/download/v${OVERWOLF_HOOK_VERSION}/overwolf-hook-${OVERWOLF_HOOK_VERSION}-abi-windows-x64.zip")
+        URL "https://github.com/SteveOberst/Overwolf-Hook/releases/download/v${OVERWOLF_HOOK_VERSION}/overwolf-hook-${OVERWOLF_HOOK_VERSION}-windows-x64.zip")
     FetchContent_MakeAvailable(overwolf_hook_sdk)
     find_package(OverwolfHook ${OVERWOLF_HOOK_VERSION} EXACT CONFIG REQUIRED
         PATHS "${overwolf_hook_sdk_SOURCE_DIR}" NO_DEFAULT_PATH)
@@ -17,7 +17,4 @@ add_executable(first_overlay main.c)
 target_compile_features(first_overlay PRIVATE c_std_17)
 target_compile_definitions(first_overlay PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(first_overlay PRIVATE OverwolfHook::Client)
-add_custom_command(TARGET first_overlay POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:OverwolfHook::Client>" "$<TARGET_FILE:OverwolfHook::Agent>"
-        "$<TARGET_FILE_DIR:first_overlay>" VERBATIM)
+overwolf_hook_deploy_runtime(first_overlay)

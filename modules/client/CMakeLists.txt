@@ -12,7 +12,6 @@ set(client_sources
     src/session/target.cpp
     src/overwolf/process.hpp
     src/overwolf/installation.cpp
-    src/overwolf/control.cpp
     src/session/preflight.cpp
     src/session/bootstrap.cpp
     src/session/attached_session.cpp
@@ -21,7 +20,7 @@ set(client_sources
     src/session/bootstrap_payload.hpp
     src/overlays/overlay.cpp
     src/overlays/overlay.hpp)
-# The DLL and independently compiled test variant share these requirements.
+# Common objects and the two control implementations share these requirements.
 function(owh_configure_client_implementation target)
     owh_configure_native(${target})
     target_compile_definitions(${target} PRIVATE OWH_BUILD_owh_client)
@@ -30,9 +29,15 @@ function(owh_configure_client_implementation target)
         owh_abi owh_platform owh_ipc owh_overwolf_passive owh_build_info bcrypt advapi32 version shell32)
 endfunction()
 
-add_library(owh_client SHARED ${client_sources} "${OWH_VERSION_RESOURCE}")
+# Only Overwolf control has a fixture-specific implementation; share the rest.
+add_library(owh_client_objects OBJECT ${client_sources})
+owh_configure_client_implementation(owh_client_objects)
+set_target_properties(owh_client_objects PROPERTIES FOLDER Native/Client)
+
+add_library(owh_client SHARED src/overwolf/control.cpp "${OWH_VERSION_RESOURCE}")
 add_library(OverwolfHook::Client ALIAS owh_client)
 owh_configure_client_implementation(owh_client)
+target_link_libraries(owh_client PRIVATE owh_client_objects)
 target_sources(owh_client PUBLIC FILE_SET api_headers TYPE HEADERS
     BASE_DIRS "${PROJECT_SOURCE_DIR}/include" FILES ${OWH_PUBLIC_HEADERS})
 target_include_directories(owh_client INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")

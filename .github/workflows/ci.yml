@@ -17,6 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         configuration: [Debug, Release]
+    env:
+      NATIVE_DIRECTORY: ${{ github.workspace }}/build/ci/native/${{ matrix.configuration }}
+      JVM_BUILD: ${{ github.workspace }}/build/ci/jvm/${{ matrix.configuration }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -39,13 +42,13 @@ jobs:
       - name: Build and test JVM artifacts
         shell: pwsh
         run: |
-          $jvmBuild = "$PWD/build/ci/jvm/${{ matrix.configuration }}"
-          ./jvm/gradlew.bat -p jvm check assemble --project-cache-dir "$jvmBuild/.gradle" "-PowhBuildDirectory=$jvmBuild" "-PnativeDirectory=$PWD/build/ci/native/${{ matrix.configuration }}" --no-daemon
+          $jvmBuild = $env:JVM_BUILD
+          ./jvm/gradlew.bat -p jvm check assemble publish --project-cache-dir "$jvmBuild/.gradle" "-PowhBuildDirectory=$jvmBuild" "-PnativeDirectory=$env:NATIVE_DIRECTORY" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify direct Java FFM consumers
         shell: pwsh
         run: |
-          $native = "$PWD/build/ci/native/${{ matrix.configuration }}"
+          $native = $env:NATIVE_DIRECTORY
           $env:PATH = "$native;$env:PATH"
           $fixture = "$PWD/build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe"
           & $fixture jvm "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/ffm/java/FfmStateRead.java" "$native/owh_client.dll"
@@ -58,21 +61,19 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content version.txt).Trim()
-          $jvmBuild = "$PWD/build/ci/jvm/${{ matrix.configuration }}"
-          $jar = "$jvmBuild/libs/overwolf-hook-$version-abi-windows-x64.jar"
-          ./jvm/gradlew.bat -p jvm publish --project-cache-dir "$jvmBuild/.gradle" "-PowhBuildDirectory=$jvmBuild" "-PnativeDirectory=$PWD/build/ci/native/${{ matrix.configuration }}" --no-daemon
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $jvmBuild = $env:JVM_BUILD
+          $jar = "$jvmBuild/java/libs/overwolf-hook-$version-windows-x64.jar"
           $repository = "$jvmBuild/repository"
           ./jvm/gradlew.bat -p tests/consumers/kotlin installDist "-PsdkVersion=$version" "-PsdkRepository=$repository" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./jvm/gradlew.bat -p tests/consumers/java installDist "-PsdkVersion=$version" "-PsdkRepository=$repository" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:PATH = "$PWD/build/ci/native/${{ matrix.configuration }};$env:PATH"
+          $env:PATH = "$env:NATIVE_DIRECTORY;$env:PATH"
           ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/consumers/kotlin/build/install/owh-kotlin-consumer-fixture/lib/*" ConsumerSmokeKt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$PWD/tests/consumers/java/build/install/owh-java-consumer-fixture/lib/*" ConsumerSmoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$jvmBuild/classes/java/test"
+          ./build/ci/tests/${{ matrix.configuration }}/owh_state_tests.exe jvm-library "$env:JAVA_HOME/bin/java.exe" "$jar;$jvmBuild/java/classes/java/test"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify installed Native SDK consumers
         shell: pwsh
@@ -95,7 +96,7 @@ jobs:
           $zip = Get-ChildItem out/packages -Filter '*.zip'
           if (@($zip).Count -ne 1) { throw 'Expected exactly one package' }
           $version = (Get-Content version.txt).Trim()
-          Get-ChildItem "build/ci/jvm/Release/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination out/packages/
+          Get-ChildItem "$env:JVM_BUILD/repository/v$version" -File | Where-Object { $_.Extension -in '.jar', '.xml' } | Copy-Item -Destination out/packages/
           $lines = Get-ChildItem out/packages -File | Where-Object { $_.Extension -in '.zip', '.jar', '.xml' } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
@@ -105,7 +106,7 @@ jobs:
         if: matrix.configuration == 'Release'
         shell: pwsh
         run: |
-          python tools/docs/smoke.py --sdk-dir out/install --ivy-repository build/ci/jvm/Release/repository --work-dir build/docs-smoke
+          python tools/docs/smoke.py --sdk-dir out/install --ivy-repository "$env:JVM_BUILD/repository" --work-dir build/docs-smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.configuration == 'Release'
@@ -123,6 +124,6 @@ jobs:
           name: tests-${{ matrix.configuration }}
           path: |
             build/ci/test-results.xml
-            build/ci/jvm/${{ matrix.configuration }}/test-results/test/*.xml
+            build/ci/jvm/${{ matrix.configuration }}/*/test-results/test/*.xml
             build/docs-smoke/report.json
           if-no-files-found: warn
