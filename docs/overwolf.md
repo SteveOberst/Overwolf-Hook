@@ -19,7 +19,9 @@ Choose the action your application needs:
 ## Before you begin
 
 Add the [dependency](getting-started/installation.md) first. Java and Kotlin
-reuse the selected native library, loading the bundled pair on first use.
+load the Client DLL automatically on first use, or reuse the selected library.
+An earlier `OverwolfHook.load()` call is optional; see
+[native library loading](reference/java-api.md#native-library-loading).
 The snippets are callable helpers; Java methods propagate loading/native
 exceptions to their caller. C callers check the returned status. C++ callers can construct
 `overwolf_hook::OverwolfController{}` directly; see the
@@ -80,9 +82,9 @@ These helpers return an absent result when it is not found; they do not launch i
     --8<-- "docs/assets/examples/kotlin/ManageOverwolf.kt:process"
     ```
 
-Process and installation queries return point-in-time values. Java and Kotlin
-reuse the selected DLLs, or load the bundled pair on first use. The controller owns no session and needs
-no `close()`. It is also available through `sdk.overwolf()`.
+Process and installation queries return point-in-time values. The controller
+owns no session and needs no `close()`. It is also available through
+`sdk.overwolf()`.
 
 An absent result means no matching installation or process was found. Access
 errors remain errors. If more than one main process matches, select a PID

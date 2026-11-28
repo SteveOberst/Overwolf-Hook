@@ -14,9 +14,10 @@ import static java.lang.foreign.ValueLayout.ADDRESS;
 /** Passive state and source-discovery operations; no agent attachment is required. */
 public final class GameStateController {
     GameStateController() {}
-    /** Reuses the loaded native pair, or loads the bundled pair on first use. */
+    /** Creates a passive controller, loading the Client through
+     * {@link OverwolfHook#load()} if needed. Does not attach to the Agent. */
     public static GameStateController open() throws IOException {
-        OverwolfHook.loadNative();
+        OverwolfHook.load();
         return new GameStateController();
     }
     public List<SourceChannel> sources() throws NativeFailure {

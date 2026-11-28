@@ -15,9 +15,10 @@ import java.util.Optional;
  */
 public final class OverwolfController {
     private OverwolfController() { }
-    /** Reuses the loaded native pair, or loads the bundled pair on first use. */
+    /** Creates a local controller, loading the Client through
+     * {@link OverwolfHook#load()} if needed. Does not attach to the Agent. */
     public static OverwolfController open() throws IOException {
-        OverwolfHook.loadNative();
+        OverwolfHook.load();
         return loaded();
     }
     static OverwolfController loaded() { return new OverwolfController(); }

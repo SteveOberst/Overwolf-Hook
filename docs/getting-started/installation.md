@@ -172,8 +172,9 @@ your dependency and native-library setup.
 4. Run the program. Successful completion with exit code `0` confirms the local
    library loaded; continue to a feature guide only after this succeeds.
 
-The check does not need a game or a running
-Overwolf process, and it does not create an overlay or start collecting events.
+The check loads the Client DLL into your application and prints its SDK version
+and build number. It creates no SDK context or Agent connection. You do not need
+a game or a running Overwolf process.
 
 === "C"
 
@@ -183,6 +184,10 @@ Overwolf process, and it does not create an overlay or start collecting events.
     ```c
     --8<-- "docs/assets/generated/integration/native/main.c"
     ```
+
+    Windows loads the linked Client DLL when the program starts. The version
+    query confirms that your application can call it; no load or attach call
+    is needed.
 
     For the complete example with Visual Studio 2022:
 
@@ -210,7 +215,8 @@ Overwolf process, and it does not create an overlay or start collecting events.
     ./build/Release/my_app.exe
     ```
 
-    This opens only the local SDK context; it does not attach to Overwolf.
+    Windows loads the linked Client DLL at program startup, as for C. The
+    static version query does not open an SDK context.
 
 === "Java"
 
@@ -219,6 +225,10 @@ Overwolf process, and it does not create an overlay or start collecting events.
     ```java
     --8<-- "docs/assets/generated/integration/java/SdkCheck.java"
     ```
+
+    `load()` extracts the bundled DLLs and loads the Client into this JVM.
+    The Agent DLL stays on disk until you attach to Overwolf. Repeated calls
+    reuse the same selection; there is nothing to close after a load check.
 
     Run it using your application's launcher with native access enabled. The
     [complete build example](../assets/generated/integration/java/build.gradle.kts) sets this
@@ -232,15 +242,38 @@ Overwolf process, and it does not create an overlay or start collecting events.
     --8<-- "docs/assets/generated/integration/kotlin/SdkCheck.kt"
     ```
 
+    Kotlin uses the same loader as Java. `load()` extracts the bundled DLLs
+    and loads the Client into this JVM, leaving the Agent DLL on disk until
+    attach. Repeated calls reuse that selection; no `use` block is needed.
+
     [Download `SdkCheck.kt`](../assets/generated/integration/kotlin/SdkCheck.kt).
 
     Run it using your application's launcher with native access enabled. The
     [complete build example](../assets/generated/integration/kotlin/build.gradle.kts) sets this
     main class, so a project using it can run `./gradlew.bat run`.
 
-The C example reads the ABI version. The Java and Kotlin examples open and close an SDK context. On the JVM, `open()`
-extracts the bundled DLLs and loads the client. Loading alone does not connect to
-Overwolf. If it fails, see [local loading troubleshooting](../troubleshooting.md#fix-local-library-loading).
+Successful output has this form:
+
+```text
+Overwolf Hook SDK_VERSION loaded (build BUILD_NUMBER)
+```
+
+`SDK_VERSION` and `BUILD_NUMBER` are the values compiled into the loaded library.
+If the check fails, see [local loading troubleshooting](../troubleshooting.md#fix-local-library-loading).
+
+Loading, opening a context, and attaching are separate operations:
+
+- **Load the library:** makes the Client's functions available in your application.
+  Java and Kotlin expose `OverwolfHook.load()` for an explicit check; `open()` and
+  other entry points also load it automatically if needed.
+- **Open an SDK context:** `open()` creates local attachment state. It does not
+  connect to Overwolf, inject the Agent, or restart a process.
+- **Attach:** `attach()` establishes the Agent connection inside Overwolf.
+  The default attach can restart Overwolf.
+
+You do not need to call `load()` before every JVM SDK operation. Use it to handle
+loading failures separately from context creation. For custom DLL directories,
+see [native library loading](../reference/java-api.md#native-library-loading).
 
 <a id="what-the-load-check-means"></a>
 ## Prepare Overwolf for live use

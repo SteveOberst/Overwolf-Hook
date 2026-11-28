@@ -78,7 +78,9 @@ On Linux/macOS use `.venv-docs/bin/python`. Preview binds to `127.0.0.1:8000`; s
 
 Give each content page a descriptive `title` and a unique `description` in its
 Markdown front matter. Keep short navigation labels in `zensical.toml`. The
-theme derives search and social-preview metadata from those fields; the site
+homepage title puts the project name first; other pages put their topic first.
+The shared formatter in `overrides/main.html` owns both HTML and social titles.
+The theme derives search and social-preview metadata from those fields; the site
 check verifies metadata, canonical URLs, and sitemap coverage. Static verification
 files are copied unchanged and are not articles in the navigation or sitemap.
 

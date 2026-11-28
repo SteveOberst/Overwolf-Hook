@@ -1,7 +1,8 @@
 import dev.sxlver.overwolfhook.OverwolfHook
 
 fun main() {
-    OverwolfHook.open().use {
-        println("Overwolf Hook SDK context opened")
-    }
+    OverwolfHook.load()
+    val info = OverwolfHook.buildInfo()
+    println("Overwolf Hook ${info.sdkVersion.utf8()} loaded " +
+        "(build ${info.buildNumber})")
 }

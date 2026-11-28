@@ -50,7 +50,15 @@ waits for native cleanup before returning control.
 
 ## Context and options
 
-`OverwolfHook.open()` creates an independent native SDK context. The Kotlin
+`OverwolfHook.load()` and `OverwolfHook.load(Path)` are callable directly from
+Kotlin. They load the Client into the JVM without creating a context or
+connecting to Overwolf. No Kotlin-specific loader or extension import is needed.
+Use `OverwolfHook.buildInfo()` to read `sdkVersion.utf8()` and `buildNumber` from
+the returned value. See the [installation load check](../getting-started/installation.md#check-that-the-library-loads)
+for a complete example.
+
+`OverwolfHook.open()` creates an independent local SDK context and loads the
+Client automatically if needed. It does not attach to Overwolf. The Kotlin
 extension properties `sdk.overlays`, `sdk.events`, `sdk.gameState`, and `sdk.overwolf` expose
 the context's controllers. Use `sdk.attach()` or `sdk.attach(ClientOptions)` to
 establish an Agent session; `sdk.detach()` ends it. Use generated model setters
@@ -59,8 +67,9 @@ from Kotlin.
 also provides passive state/discovery access without an SDK context.
 
 The complete [Java facade](java-api.md#quick-lookup) is also callable from Kotlin, including
-`open(Path)`, `buildInfo()`, `check()`, `probeAgent()`, `agentInfo()`, `ping(timeoutMillis)`
-and all controller/resource methods. Its [native loader selection](java-api.md#overwolfhook-context)
+`load()`, `load(Path)`, `open(Path)`, `buildInfo()`, `check()`, `probeAgent()`,
+`agentInfo()`, `ping(timeoutMillis)`, and all controller/resource methods.
+Its [native loader selection and failures](java-api.md#native-library-loading)
 also applies here: default operations reuse an explicitly selected pair. Import the helpers you use from
 `dev.sxlver.overwolfhook.kotlin`; they are extensions, not replacement owners.
 An in-flight `ping` timeout closes the entire Agent session; it is different

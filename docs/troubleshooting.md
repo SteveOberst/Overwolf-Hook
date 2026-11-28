@@ -28,6 +28,12 @@ Use the [installation load check](getting-started/installation.md#check-that-the
 4. Run the load check again. Exit code `0` confirms the local library loaded;
    only then continue to attach or a passive controller.
 
+Java and Kotlin can call `OverwolfHook.load()` to isolate local loading from
+context creation. It does not open a context or connect to Overwolf. Other SDK
+entry points also load the Client automatically if needed. See
+[native library loading](reference/java-api.md#native-library-loading) for
+custom directory selection and loading failures.
+
 Common local symptoms have different causes:
 
 | Symptom | Action and expected result |
@@ -36,7 +42,7 @@ Common local symptoms have different causes:
 | Native-access warning or denial | Add `--enable-native-access=ALL-UNNAMED` to the application's JVM options, then run the same entry point again. |
 | `UnsatisfiedLinkError` or missing-DLL error | Check x64 architecture, matching DLL packaging and the Redistributable. Preserve the complete loader error, including any named dependency. |
 | Missing runtime payload / extraction `IOException` | Confirm the dependency includes its native resources and the application's temporary directory is writable; rerun without manually mixing another release's DLLs into it. |
-| A different native build is already loaded | A previous explicit `open(Path)` selected another canonical directory. Use that same selection or start a new application process to switch; default factories reuse the selected pair. |
+| A different native build is already loaded | A previous explicit `load(Path)` or `open(Path)` selected another canonical directory. Use that same selection or start a new application process to switch; default factories reuse the selected pair. |
 
 <a id="diagnose-attach-and-feature-failures"></a>
 ## Diagnose an Agent connection
