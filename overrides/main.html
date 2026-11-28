@@ -1,9 +1,33 @@
 {% extends "base.html" %}
 
+{% macro document_title() -%}
+  {%- set topic = "" -%}
+  {%- if page -%}
+    {%- if page.meta and page.meta.title -%}
+      {%- set topic = page.meta.title -%}
+    {%- elif page.title -%}
+      {%- set topic = page.title -%}
+    {%- endif -%}
+  {%- endif -%}
+  {%- if topic and topic != config.site_name -%}
+    {%- if page.canonical_url == config.site_url -%}
+      {{- config.site_name }} - {{ topic | striptags -}}
+    {%- else -%}
+      {{- topic | striptags }} - {{ config.site_name -}}
+    {%- endif -%}
+  {%- else -%}
+    {{- config.site_name -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% block htmltitle %}
+  <title>{{ document_title() | e }}</title>
+{% endblock %}
+
 {% block extrahead %}
   {{ super() }}
   {% if page and page.canonical_url %}
-    {% set title = (page.meta.title or page.title) ~ " - " ~ config.site_name %}
+    {% set title = document_title() %}
     {% set description = page.meta.description or config.site_description %}
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="{{ config.site_name | e }}">

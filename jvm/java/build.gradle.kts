@@ -73,6 +73,12 @@ val artifactTest = registerSmoke("artifactTest", "JvmSmokeTest")
 val nativeLoaderTest = registerSmoke("nativeLoaderTest", "NativeLoaderTest").apply {
     configure { args(layout.buildDirectory.dir("native-loader-test").get().asFile.absolutePath) }
 }
+val nativeLoaderBundledTest = registerSmoke("nativeLoaderBundledTest", "NativeLoaderTest").apply {
+    configure { args(layout.buildDirectory.dir("native-loader-test").get().asFile.absolutePath, "bundled") }
+}
+val nativeLoaderFailureTest = registerSmoke("nativeLoaderFailureTest", "NativeLoaderTest").apply {
+    configure { args(layout.buildDirectory.dir("native-loader-test").get().asFile.absolutePath, "failures") }
+}
 val overlayContracts = registerSmoke("overlayContracts", "dev.sxlver.overwolfhook.internal.OverlayContractTest")
 val cacheTest by tasks.registering(Exec::class) {
     dependsOn(tasks.testClasses, tasks.jar)
@@ -95,4 +101,5 @@ val bindingModelsTest by tasks.registering(Exec::class) {
         commandLine(python.get(), "-m", "unittest", "discover", "-s", "tools/bindings/tests", "-v")
     }
 }
-tasks.check { dependsOn(artifactTest, nativeLoaderTest, overlayContracts, cacheTest, bindingModelsTest) }
+tasks.check { dependsOn(artifactTest, nativeLoaderTest, nativeLoaderBundledTest,
+    nativeLoaderFailureTest, overlayContracts, cacheTest, bindingModelsTest) }

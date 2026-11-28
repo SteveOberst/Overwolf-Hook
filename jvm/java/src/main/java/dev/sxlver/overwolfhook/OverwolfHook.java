@@ -26,17 +26,36 @@ public final class OverwolfHook implements AutoCloseable {
 
     private OverwolfHook(MemorySegment handle) { this.handle = new NativeHandle(handle); }
 
-    /** Reuses the loaded native pair, or loads the bundled pair on first use. */
+    /** Creates a local SDK context, loading the Client DLL if needed.
+     * Does not connect to Overwolf; use {@link #attach()} for that. */
     public static OverwolfHook open() throws IOException {
-        loadNative();
+        load();
         return openLoaded();
     }
 
-    static synchronized void loadNative() throws IOException {
-        if (loadedDirectory == null) loadNative(NativeBinaries.directory());
+    /** Loads the bundled Client DLL, or reuses the libraries already selected.
+     * Extracts the matching Agent DLL for later attachment but does not load it
+     * into Overwolf. Creates no SDK context or Agent connection. Repeated calls
+     * reuse the selection for this class loader; no close operation is needed.
+     * @throws IOException if extraction or ABI validation fails
+     * @throws UnsupportedOperationException if the bundled platform is unsupported
+     * @throws UnsatisfiedLinkError if the Client DLL or a dependency cannot load
+     */
+    public static synchronized void load() throws IOException {
+        if (loadedDirectory == null) load(NativeBinaries.directory());
     }
 
-    static synchronized void loadNative(Path directory) throws IOException {
+    /** Loads the Client DLL from a directory containing the matching native pair.
+     * Select this directory before the first native operation. Repeated calls
+     * with the same canonical directory reuse it. Creates no SDK context or
+     * Agent connection and does not load the Agent DLL into Overwolf.
+     * @param directory the directory containing owh_client.dll and owh_agent.dll
+     * @throws IOException if the directory or Agent payload is missing or ABI
+     * validation fails
+     * @throws IllegalStateException if a different directory is already selected
+     * @throws UnsatisfiedLinkError if the Client DLL or a dependency cannot load
+     */
+    public static synchronized void load(Path directory) throws IOException {
         Path canonical = directory.toRealPath();
         if (!Files.isRegularFile(canonical.resolve("owh_agent.dll")))
             throw new IOException("Missing matching runtime payload: " + canonical.resolve("owh_agent.dll"));
@@ -51,8 +70,9 @@ public final class OverwolfHook implements AutoCloseable {
         }
     }
 
+    /** Creates a local SDK context using {@link #load(Path)}; does not attach. */
     public static OverwolfHook open(Path directory) throws IOException {
-        loadNative(directory);
+        load(directory);
         return openLoaded();
     }
 
@@ -127,9 +147,10 @@ public final class OverwolfHook implements AutoCloseable {
         }
     }
 
-    /** Reads this loaded Client's SDK version and build number without attaching. */
+    /** Returns the Client's SDK version and build number, loading it if needed.
+     * Creates no SDK context or Agent connection. */
     public static BuildInfo buildInfo() throws IOException, NativeFailure {
-        loadNative();
+        load();
         try (var arena = Arena.ofConfined()) {
             var output = BuildInfo.allocate(arena);
             NativeResults.check("read SDK build info", OverwolfNative.owh_sdk_build_info(arena, output));

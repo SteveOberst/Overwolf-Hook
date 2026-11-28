@@ -11,6 +11,10 @@ rules, or [data records](../data-records.md) for field meanings.
 
 For usage, see [connections and resource lifetime](../contracts.md) and the [first overlay walkthrough](../../overlays/first-overlay.md).
 
+Windows loads the linked Client DLL when your application starts. No SDK
+context is required to query `owh_sdk_build_info()` or `owh_sdk_abi_version()`.
+See the [installation load check](../../getting-started/installation.md#check-that-the-library-loads).
+
 ## `owh_sdk_open`
 
 Opens an independent SDK context:
@@ -20,6 +24,8 @@ Opens an independent SDK context:
 ```
 
 Supply a writable handle output; no `.size` is involved. Returns `OK` with ownership of one context, `INVALID_ARGUMENT` for a null output, or an allocation failure.
+The context is local: this call does not create an Agent connection, inject
+the Agent, or start feature hooks. Use `owh_sdk_attach` to connect it.
 
 ## `owh_sdk_close`
 

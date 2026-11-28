@@ -12,9 +12,10 @@ Function and Memory (FFM) API over the
 same C ABI as native callers. The facade has per-instance SDK contexts; only
 the DLL loader is shared by the class loader.
 
-`OverwolfHook.buildInfo()` returns the loaded Client's generated `BuildInfo`
-record without opening or attaching an SDK context. `AgentInfo` includes the
-resident Agent's own build information.
+`OverwolfHook.load()` loads the Client without opening an SDK context or
+connecting to Overwolf. `OverwolfHook.buildInfo()` returns its generated
+`BuildInfo` record and also loads the Client if needed. `AgentInfo` includes
+the resident Agent's own build information.
 
 For a complete application, see [your first overlay](../overlays/first-overlay.md).
 For repeated image updates, see [pixel-buffer submission](../overlays/pixel-buffers.md).
@@ -27,7 +28,7 @@ field meanings, numeric flags and native outcomes have one owner in
 
 | Resource | Operations |
 | --- | --- |
-| [OverwolfHook](#overwolfhook-context) | Open/select DLLs, attach/detach, check/probe, build/Agent identity, ping, controller access, close |
+| [OverwolfHook](#native-library-loading) | Load/select DLLs, open a context, attach/detach, check/probe, build/Agent identity, ping, controller access, close |
 | [OverwolfController](#overwolfcontroller) | Discover installation/process, start, stop |
 | [OverlayController](#overlaycontroller) | Capabilities, create either source type |
 | [PixelBufferOverlay / PixelFrame](#pixelbufferoverlay-and-pixelframe) | Submit images, configure delivery, optional direct frames, info, close |
@@ -38,16 +39,40 @@ field meanings, numeric flags and native outcomes have one owner in
 | [WaitCancellation / errors](#cancellation-and-failures) | Signal/join waits, inspect failures |
 | [Models / ByteView](#models-and-byte-views) | Input setters, owned outputs, raw byte access |
 
+## Native library loading
+
+Use these static methods when you want to handle local loading before any
+context or controller is created:
+
+| Method | Return / behavior |
+| --- | --- |
+| `static void load()` | Extracts the bundled Client/Agent pair and loads the Client DLL, or reuses the already selected pair. Does not create a context or attach. |
+| `static void load(Path directory)` | Selects a directory containing matching `owh_client.dll` and `owh_agent.dll`, then loads the Client. Select the directory before the first native operation. |
+| `static BuildInfo buildInfo()` | Loads the Client if needed and returns its SDK version and build number. Does not create a context or attach; native query failures throw `NativeFailure`. |
+
+The Agent DLL is an on-disk payload until attachment; `load()` does not inject
+it into Overwolf. These methods do not return a closeable resource or support
+unloading. Repeated calls reuse the selection for this class loader. Loading
+the same canonical directory again is allowed; a different explicit directory
+throws `IllegalStateException`, even for byte-identical DLLs.
+
+Extraction, missing-directory/payload, and ABI-validation failures throw
+`IOException`. A Client DLL or dependency that cannot load produces
+`UnsatisfiedLinkError`. Bundled loading on an unsupported platform throws
+`UnsupportedOperationException`. Preserve JVM native-access errors and enable
+native access as shown in [installation](../getting-started/installation.md).
+
+Default `open()`, `buildInfo()`, and standalone controller factories use the
+same loader. They prepare the bundled pair and load the Client if nothing is
+selected, or reuse an explicit selection. They do not require an earlier `load()` call and do not
+switch back to bundled DLLs.
+
 ## OverwolfHook context
 
-`OverwolfHook.open()` reuses the selected native pair, or loads the bundled
-pair on first use, and opens an independent SDK context. `open(Path)` explicitly
-selects a directory containing matching `owh_client.dll` and `owh_agent.dll`.
-Choose it before the first native operation. A later explicit call with a
-different canonical directory throws `IllegalStateException`, even for
-byte-identical DLLs. Default `open()`, `buildInfo()` and standalone controller
-factories reuse the loaded pair; they do not switch back to bundled DLLs.
-Loading/extraction failures throw `IOException`.
+`OverwolfHook.open()` creates an independent local SDK context, loading the
+Client if needed. `open(Path)` selects the directory through `load(Path)` and
+then creates a context. Neither call connects to Overwolf. Close the context
+when finished; closing it does not unload the native libraries.
 
 `attach()` or `attach(ClientOptions)` establishes the Agent session;
 `detach()` closes that attachment. `check([ClientOptions])` produces a passive
@@ -84,7 +109,7 @@ See the complete [HOT attach example](../assets/examples/java/HotAttach.java).
 
 ## OverwolfController
 
-`OverwolfController.open()` reuses the selected DLL pair (bundled on first use),
+`OverwolfController.open()` uses the [shared loader](#native-library-loading),
 without opening an SDK context
 or attaching an Agent. `installation()` and `runningProcess([pid, started])`
 return optional generated `OverwolfInstallation` / `OverwolfProcess` values.
@@ -94,7 +119,7 @@ operation. See [managing Overwolf](../overwolf.md) for absence/error and version
 
 | Method | Return / behavior |
 | --- | --- |
-| `static open()` | `OverwolfController`; reuses/loads the native pair, may throw `IOException`. |
+| `static open()` | `OverwolfController`; loads the Client if needed, may throw `IOException`. Does not create an SDK context or attach. |
 | `installation()` | `Optional<OverwolfInstallation>` with directory, launcher and installed version. |
 | `runningProcess()` / `runningProcess(long pid, long started)` | `Optional<OverwolfProcess>` with PID, creation time, executable and running version. Zero PID selects unique-process discovery; nonzero creation time must match. |
 | `start()` / `start(long timeoutMillis)` | `OverwolfProcess`; returns an existing process or launches and waits. Default 10 seconds. |

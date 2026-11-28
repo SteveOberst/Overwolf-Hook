@@ -14,8 +14,11 @@ The API groups features into controllers; local Overwolf control can also be use
 independently of an SDK context. Native data
 records remain the C types in `types/*.h`.
 
-`OverwolfHook::build_info()` returns the loaded Client's SDK
-version/build number without opening or attaching a context. The C ABI version
+Windows loads the linked Client DLL when your application starts; the facade
+needs no explicit library-load call. `OverwolfHook::build_info()` returns the
+Client's SDK version/build number without opening or attaching a context.
+See the [installation load check](../getting-started/installation.md#check-that-the-library-loads).
+The C ABI version
 is available separately through `OverwolfHook::abi_version()`.
 
 For a complete application, see [your first overlay](../overlays/first-overlay.md).
@@ -42,7 +45,8 @@ for the complete underlying function contract.
 
 ## SDK context
 
-`OverwolfHook::open()` creates an independent context. `attach(options = nullptr)`
+`OverwolfHook::open()` creates an independent local context without connecting
+to Overwolf. `attach(options = nullptr)`
 uses native defaults; `detach()` closes the current attachment.
 `check_client(const owh_client_options *options = nullptr)` returns a
 point-in-time diagnostic report and

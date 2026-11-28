@@ -9,6 +9,7 @@ import tomllib
 from urllib.parse import unquote, urljoin, urlsplit
 import xml.etree.ElementTree as ET
 import zipfile
+import yaml
 from reference import declarations, enum_constants, public_headers, record_declarations
 from build import SDK_VERSION_TOKEN, render_version
 
@@ -153,6 +154,19 @@ def main() -> int:
             errors.append(f"Missing content page: {source}")
             continue
         title = page.title.strip()
+        frontmatter = re.match(r"\A---\n(.*?)\n---(?:\n|$)",
+                               (ROOT / "docs" / source).read_text(encoding="utf-8"), re.S)
+        metadata = yaml.safe_load(frontmatter.group(1)) if frontmatter else {}
+        topic = metadata.get("title") if isinstance(metadata, dict) else None
+        if not isinstance(topic, str) or not topic.strip():
+            errors.append(f"Missing page title in Markdown front matter: {source}")
+        else:
+            site_name = project["site_name"]
+            expected_title = (site_name if topic == site_name
+                              else f"{site_name} - {topic}" if source == "index.md"
+                              else f"{topic} - {site_name}")
+            if title != expected_title:
+                errors.append(f"Page title does not follow the site title format: {source}")
         description = page.metadata.get("description", "").strip()
         for kind, value, seen in (("title", title, titles), ("description", description, descriptions)):
             if not value:

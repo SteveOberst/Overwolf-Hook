@@ -15,7 +15,21 @@ and [constants and flags](constants.md); callable contracts are in the
 
 Overlays and event subscriptions require an attached SDK context. Passive
 game-state reads and local Overwolf installation/process management do not.
-Opening the SDK loads the Client locally; it does not attach to Overwolf.
+
+Loading the Client DLL, creating an SDK context, and connecting to Overwolf
+are separate operations:
+
+- **Library loading** makes native functions available in your application.
+  Windows loads the Client at startup for normally linked C/C++ programs.
+  Java and Kotlin load it on first SDK use or through explicit `OverwolfHook.load()`.
+  The JVM extracts the Agent payload too, but does not inject it during loading.
+- **Context creation** through `open()` allocates local attachment state.
+  It does not create an IPC session, start Overwolf, or install hooks.
+- **Attachment** through `attach()` establishes the Agent session in Overwolf.
+  Its process effects depend on the [attach mode](#attach-modes).
+
+For a local setup check, query the loaded Client's build information without
+opening a context. See the [installation load check](../getting-started/installation.md#check-that-the-library-loads).
 
 For an overlay or event application, the normal sequence is:
 
