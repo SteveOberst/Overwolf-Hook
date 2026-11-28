@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/SteveOberst/Overwolf-Hook/compare/v1.0.0...v1.0.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* separate library loading from SDK context creation ([#9](https://github.com/SteveOberst/Overwolf-Hook/issues/9)) ([70c47e5](https://github.com/SteveOberst/Overwolf-Hook/commit/70c47e564c610e8a14a78eec54af6a9f53799fae))
+
 ## [1.0.0](https://github.com/SteveOberst/Overwolf-Hook/compare/v0.5.0-beta.1...v1.0.0) (2026-11-27)
 
 
